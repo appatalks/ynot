@@ -7,7 +7,7 @@ This script adds your GitHub Enterprise Server's SSL to your Runner's certificat
 To use this script, download it your your Runner's Path and execute it with the following command:
 
 ```bash
-curl -s https://raw.githubusercontent.com/appatalks/gh_shr_cert_update/main/add_certificate.sh -O add_certificate.sh; chmod +x add_certificate.sh; sudo bash add_certificate.sh
+https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_shr_cert_update/add_certificate.sh -O add_certificate.sh; chmod +x add_certificate.sh; sudo bash add_certificate.sh
 ```
 
 <br>
