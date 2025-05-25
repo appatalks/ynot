@@ -50,6 +50,18 @@ USERS=()
 if [[ -f "$ROOT_DIR/generated-users.txt" ]]; then
   mapfile -t USERS < "$ROOT_DIR/generated-users.txt"
   echo "Loaded ${#USERS[@]} users from generated-users.txt"
+  
+  # If we have no users at all, teams won't be very useful
+  if [[ ${#USERS[@]} -eq 0 ]]; then
+    echo "⚠ No users available for teams. Consider running the create-users module first."
+    echo "Continuing with team creation, but teams will have no members."
+  fi
+  
+  # If the server has user limits, we may want to reduce the number of teams
+  if [[ ${#USERS[@]} -lt 5 && $NUM_TEAMS -gt 5 ]]; then
+    echo "⚠ Limited users detected ($NUM_USERS). Consider reducing NUM_TEAMS in config.env"
+    echo "Creating teams with limited membership may result in less useful testing."
+  fi
 fi
 
 # Get list of repositories in the organization
@@ -143,6 +155,13 @@ for i in $(seq 1 "$NUM_TEAMS"); do
     
     echo "     → Adding $NUM_USERS_TO_ADD users to team..."
     
+    # If we have very few users, distribute them carefully to avoid overloading
+    if [[ ${#USERS[@]} -lt 3 && $i -gt 2 ]]; then
+      # For later teams with limited users, reduce the number to prevent conflicts
+      NUM_USERS_TO_ADD=1
+      echo "     → Limited user pool detected, reducing to $NUM_USERS_TO_ADD user per team"
+    fi
+    
     for j in $(seq 1 "$NUM_USERS_TO_ADD"); do
       # Select user in a round-robin fashion
       USER_IDX=$(( (i + j - 2) % ${#USERS[@]} ))
@@ -156,9 +175,21 @@ for i in $(seq 1 "$NUM_TEAMS"); do
       
       echo "       • Adding $USER as $ROLE"
       
-      curl -k -s -X PUT -H "$AUTH" \
+      ADD_RESP=$(curl -k -s -X PUT -H "$AUTH" \
         "$API/orgs/${ORG}/teams/${TEAM_SLUG}/memberships/${USER}" \
-        -d "{\"role\":\"${ROLE}\"}" >/dev/null
+        -d "{\"role\":\"${ROLE}\"}")
+      
+      # Check if there was an error
+      ERROR_MSG=$(echo "$ADD_RESP" | jq -r '.message // empty')
+      if [[ -n "$ERROR_MSG" ]]; then
+        echo "       ⚠ Failed to add user to team: $ERROR_MSG"
+        
+        # If we've hit a rate limit or resource limit, pause before continuing
+        if [[ "$ERROR_MSG" == *"rate limit"* || "$ERROR_MSG" == *"abuse"* ]]; then
+          echo "       ⚠ Rate limiting detected, pausing for 30 seconds"
+          sleep 30
+        fi
+      fi
     done
   else
     echo "     → No users available to add to team"

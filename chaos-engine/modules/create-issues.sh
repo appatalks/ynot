@@ -87,13 +87,29 @@ generate_issue_body() {
       body+="### Actual Behavior\n\nThe system is taking over 2 seconds to respond.\n"
       ;;
     complex)
+      # Use separate variable for each part of the body to avoid escape issues
       body="# Complex Issue ${issue_num}\n\n"
-      body+="## Overview\n\nThis is a complex issue created by Chaos Engine with various markdown features.\n\n"
+      body+="## Overview\n\n"
+      body+="This is a complex issue created by Chaos Engine with various markdown features.\n\n"
       body+="## Technical Details\n\n"
-      body+="```json\n{\n  \"id\": ${issue_num},\n  \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\n  \"status\": \"pending\"\n}\n```\n\n"
+      
+      # Use simple code sample without json formatting
+      body+="Example data:\n\n"
+      body+="{\n"
+      body+="  \"id\": ${issue_num},\n"
+      body+="  \"created\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\n"
+      body+="  \"status\": \"pending\"\n"
+      body+="}\n\n"
+      
       body+="## Additional Information\n\n"
-      body+="| Property | Value |\n|----------|-------|\n| ID | ${issue_num} |\n| Created | $(date) |\n| Priority | High |\n\n"
-      body+="- [x] Automated test case exists\n- [ ] Documentation updated\n- [ ] Release notes updated\n\n"
+      body+="| Property | Value |\n"
+      body+="|----------|-------|\n"
+      body+="| ID | ${issue_num} |\n"
+      body+="| Created | $(date) |\n"
+      body+="| Priority | High |\n\n"
+      body+="- [x] Automated test case exists\n"
+      body+="- [ ] Documentation updated\n"
+      body+="- [ ] Release notes updated\n\n"
       body+="![Placeholder Image](https://via.placeholder.com/800x400?text=Issue+${issue_num})\n"
       ;;
   esac
@@ -224,7 +240,16 @@ for i in $(seq 1 "$NUM_ISSUES"); do
   
   # If complex issue, add a code sample as a comment
   if [[ "$COMPLEXITY" = "complex" ]]; then
-    CODE_COMMENT="Here's a code sample that demonstrates the issue:\n\n\`\`\`javascript\nfunction demonstrateIssue() {\n  const data = fetchLargeDataset();\n  // This is inefficient and causes the crash\n  const processed = data.map(item => transformItem(item));\n  return processed.filter(item => item.isValid);\n}\n\`\`\`"
+    # Create the code comment in parts to avoid shell interpretation issues
+    CODE_COMMENT="Here's a code sample that demonstrates the issue:"
+    CODE_COMMENT+="\n\n\`\`\`javascript"
+    CODE_COMMENT+="\nfunction demonstrateIssue() {"
+    CODE_COMMENT+="\n  const data = fetchLargeDataset();"
+    CODE_COMMENT+="\n  // This is inefficient and causes the crash"
+    CODE_COMMENT+="\n  const processed = data.map(item => transformItem(item));"
+    CODE_COMMENT+="\n  return processed.filter(item => item.isValid);"
+    CODE_COMMENT+="\n}"
+    CODE_COMMENT+="\n\`\`\`"
     
     # Properly escape the comment for JSON
     CODE_COMMENT_ESCAPED=$(echo -n "$CODE_COMMENT" | jq -R -s '.')

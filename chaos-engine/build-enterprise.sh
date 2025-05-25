@@ -14,9 +14,37 @@ source "$SCRIPT_DIR/config.env"
 git config --global credential.helper ""
 export GIT_SSL_NO_VERIFY GIT_TERMINAL_PROMPT
 
-# (Optional) parse arguments to run only a subset of modules
-# e.g. ./build-enterprise.sh all|orgs|repos|issues|users|teams|prs
-MODE="${1:-all}"
+# Display help function
+show_help() {
+  cat << EOF
+Chaos Engine - GitHub Test Environment Builder
+
+Usage: 
+  $(basename "$0") [option]
+
+Options:
+  all       Run all modules in sequence
+  orgs      Create organizations only
+  repos     Create repositories only
+  prs       Create pull requests only
+  issues    Create issues only
+  users     Create users only
+  teams     Create teams only
+  check     Check user license limits only
+  clean     Clean up GHES environment (keeps only license and admin user)
+  help      Display this help message
+
+For detailed configuration, edit config.env before running.
+EOF
+}
+
+# Parse arguments to run only a subset of modules
+if [[ $# -eq 0 ]]; then
+  show_help
+  exit 0
+fi
+
+MODE="$1"
 
 run_module() {
   local mod="$1"
@@ -72,15 +100,70 @@ validate_env_vars() {
 # Validate environment variables before executing any modules
 validate_env_vars
 
+# Function to run a module and check if it succeeded
+run_module_safe() {
+  local mod="$1"
+  local continue_on_error="${2:-false}"
+  
+  echo -e "\n➡️  Running module: $mod\n"
+  if bash "$SCRIPT_DIR/modules/$mod.sh"; then
+    echo -e "\n✅  Module $mod completed successfully"
+    return 0
+  else
+    local status=$?
+    echo -e "\n⚠️  Module $mod failed with exit code $status"
+    if [[ "$continue_on_error" == "true" ]]; then
+      echo "Continuing execution despite error..."
+      return 0
+    else
+      return $status
+    fi
+  fi
+}
+
 # Add new module $<FUNCTIONs>.sh to this case.
 case "$MODE" in
   all)
-    run_module create-organizations
-    run_module create-repositories
-    run_module create-repo-prs
-    run_module create-issues
-    run_module create-users
-    run_module create-teams
+    # Check user limits before beginning (helpful but optional)
+    if [[ "$GITHUB_SERVER_URL" != "https://github.com" ]]; then
+      run_module_safe check-user-limits true
+    fi
+    
+    # These modules have to succeed for the rest to work
+    run_module_safe create-organizations || exit 1
+    run_module_safe create-repositories || exit 1
+    
+    # These modules can fail but we'll still continue
+    run_module_safe create-repo-prs true
+    run_module_safe create-issues true
+    
+    # Only create users if NUM_USERS > 0
+    if [[ "$NUM_USERS" -gt 0 ]]; then
+      run_module_safe create-users true  # Users might fail if license limits reached
+    else
+      echo -e "\n⚠️  Skipping user creation - NUM_USERS is set to 0"
+    fi
+    
+    # Check if we have users before creating teams
+    # If generated-users.txt doesn't exist or is empty, ask about team creation
+    if [[ ! -f "$SCRIPT_DIR/generated-users.txt" || ! -s "$SCRIPT_DIR/generated-users.txt" ]]; then
+      echo -e "\n⚠️  No users available for teams. Teams will be created without members."
+      echo -n "Do you want to continue with team creation? (y/n) "
+      read -r CONTINUE_TEAMS
+      if [[ "$CONTINUE_TEAMS" =~ ^[Yy]$ ]]; then
+        run_module_safe create-teams true
+      else
+        echo -e "\n⚠️  Skipping team creation as requested"
+      fi
+    else
+      # We have users, proceed with team creation
+      run_module_safe create-teams true
+    fi
+    if [[ -f "$SCRIPT_DIR/generated-users.txt" ]] && [[ -s "$SCRIPT_DIR/generated-users.txt" ]]; then
+      run_module_safe create-teams true
+    else
+      echo -e "\n⚠️  Skipping teams creation - no users available"
+    fi
     ;;
   orgs)      run_module create-organizations ;;
   repos)     run_module create-repositories ;;
@@ -88,8 +171,18 @@ case "$MODE" in
   issues)    run_module create-issues ;;
   users)     run_module create-users ;;
   teams)     run_module create-teams ;;
+  check)     run_module check-user-limits ;;
+  clean)     
+    if [[ "$GITHUB_SERVER_URL" == "https://github.com" ]]; then
+      echo "⚠️ The clean option is only available for GitHub Enterprise Server instances."
+      echo "It should not be run against GitHub.com."
+      exit 1
+    fi
+    run_module clean-environment ;;
+  help)      show_help; exit 0 ;;
   *)
-    echo "Usage: $0 [all|orgs|repos|prs|issues|users|teams]" >&2
+    echo -e "⚠️  Unknown option: $MODE\n" >&2
+    show_help
     exit 1
     ;;
 esac

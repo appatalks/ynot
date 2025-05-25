@@ -61,7 +61,16 @@ for i in $(seq 1 "$NUM_USERS"); do
     
     USER_ID=$(echo "$USER_RESP" | jq -r '.id // empty')
     if [[ -z "$USER_ID" ]]; then
-      echo "     ⚠ Failed to create user: $(echo "$USER_RESP" | jq -r '.message // "Unknown error"')"
+      ERROR_MSG=$(echo "$USER_RESP" | jq -r '.message // "Unknown error"')
+      echo "     ⚠ Failed to create user: ${ERROR_MSG}"
+      
+      # Check if it's a user limit error
+      if [[ "$ERROR_MSG" == *"license seat"* || "$ERROR_MSG" == *"user limit"* || "$ERROR_MSG" == *"limit exceeded"* || "$ERROR_MSG" == *"seat limit"* ]]; then
+        echo "     ⚠ It appears this server has reached its maximum user limit"
+        echo "     ⚠ Stopping user creation and proceeding with existing users"
+        break
+      fi
+      
       continue
     fi
     
@@ -95,6 +104,14 @@ done
 # Save created users for reference by other scripts
 echo "${CREATED_USERS[@]}" > "$ROOT_DIR/generated-users.txt"
 
+# Determine how many users were actually created
+ACTUAL_USER_COUNT=${#CREATED_USERS[@]}
+
 echo "✅ create-users module complete!"
-echo "Created $NUM_USERS test users and added them to organization ${ORG}"
+if [[ $ACTUAL_USER_COUNT -eq $NUM_USERS ]]; then
+  echo "Created $ACTUAL_USER_COUNT test users as requested and added them to organization ${ORG}"
+else
+  echo "Created $ACTUAL_USER_COUNT test users (out of $NUM_USERS requested)"
+  echo "⚠️ Not all users could be created - this may be due to license seat limitations"
+fi
 echo "The list of created users is saved in $ROOT_DIR/generated-users.txt"
