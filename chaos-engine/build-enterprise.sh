@@ -63,7 +63,7 @@ validate_env_vars() {
   
   if [[ -z "${ORG}" ]]; then
     echo "⚠ Missing ORG in config.env" >&2
-    missing=true
+    echo "Organization will be created if it doesn't exist" >&2
   fi
   
   if [[ -z "${WEBHOOK_URL}" ]]; then
@@ -71,14 +71,21 @@ validate_env_vars() {
     missing=true
   fi
   
-  # For the "all" mode, validate all required variables are set
+  # Set defaults for missing NUM_* variables
+  : "${NUM_ORGS:=1}"
+  : "${NUM_REPOS:=1}"
+  : "${NUM_PRS:=1}"
+  : "${NUM_ISSUES:=1}"
+  : "${NUM_USERS:=1}"
+  : "${NUM_TEAMS:=1}"
+  
+  # Export these values so they persist for any subsequent commands
+  export NUM_ORGS NUM_REPOS NUM_PRS NUM_ISSUES NUM_USERS NUM_TEAMS
+  
+  # For validation purposes only, check module-specific variables
   if [[ "$MODE" == "all" ]]; then
-    if [[ -z "$NUM_ORGS" ]]; then echo "⚠ Missing NUM_ORGS in config.env" >&2; missing=true; fi
-    if [[ -z "$NUM_REPOS" ]]; then echo "⚠ Missing NUM_REPOS in config.env" >&2; missing=true; fi
-    if [[ -z "$NUM_PRS" ]]; then echo "⚠ Missing NUM_PRS in config.env" >&2; missing=true; fi
-    if [[ -z "$NUM_ISSUES" ]]; then echo "⚠ Missing NUM_ISSUES in config.env" >&2; missing=true; fi
-    if [[ -z "$NUM_USERS" ]]; then echo "⚠ Missing NUM_USERS in config.env" >&2; missing=true; fi
-    if [[ -z "$NUM_TEAMS" ]]; then echo "⚠ Missing NUM_TEAMS in config.env" >&2; missing=true; fi
+    # All variables are set with defaults above
+    :
   else
     # For specific modes, validate only the relevant variables
     case "$MODE" in

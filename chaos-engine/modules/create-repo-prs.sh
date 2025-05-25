@@ -29,10 +29,46 @@ REPO="hook-edge-${TS}"
 TMP=$(mktemp -d)
 AUTH="Authorization: token ${GITHUB_TOKEN}"
 
+# Check if the organization exists
+echo "Checking if organization ${ORG} exists..."
+ORG_CHECK=$(curl -k -s -X GET -H "$AUTH" "$API/orgs/${ORG}" | jq -r '.login // empty')
+if [[ -z "$ORG_CHECK" ]]; then
+  echo "⚠️ Organization ${ORG} does not exist."
+  echo "Creating organization ${ORG}..."
+  BILLING_EMAIL="${BILLING_EMAIL:-admin@example.com}"
+  ORG_RESP=$(curl -k -s -X POST -H "$AUTH" "$API/admin/organizations" \
+    -d "{\"login\":\"${ORG}\",\"admin\":\"${ADMIN_USERNAME:-$(curl -k -s -X GET -H "$AUTH" "$API/user" | jq -r '.login')}\",\"profile_name\":\"${ORG}\",\"billing_email\":\"${BILLING_EMAIL}\"}")
+  
+  if echo "$ORG_RESP" | jq -e '.login' > /dev/null; then
+    echo "✅ Created organization: ${ORG}"
+  else
+    echo "❌ Failed to create organization. Response:"
+    echo "$ORG_RESP" | jq '.'
+    echo "Attempting to create repository directly in user namespace..."
+    CURRENT_USER=$(curl -k -s -X GET -H "$AUTH" "$API/user" | jq -r '.login')
+    if [[ -n "$CURRENT_USER" ]]; then
+      echo "Using user namespace: $CURRENT_USER"
+      export ORG="$CURRENT_USER"
+    else
+      echo "❌ Cannot determine user namespace. Exiting."
+      exit 1
+    fi
+  fi
+  sleep 2
+fi
+
 # 1) Create new repo
 echo "1) Create new repo ${ORG}/${REPO}..."
-curl -k -s -X POST -H "$AUTH" "$API/orgs/${ORG}/repos" \
-  -d "{\"name\":\"${REPO}\",\"auto_init\":true,\"private\":true}" >/dev/null
+REPO_RESP=$(curl -k -s -X POST -H "$AUTH" "$API/orgs/${ORG}/repos" \
+  -d "{\"name\":\"${REPO}\",\"auto_init\":true,\"private\":true}")
+
+if echo "$REPO_RESP" | jq -e '.name' > /dev/null; then
+  echo "✅ Repository created: ${ORG}/${REPO}"
+else
+  echo "❌ Failed to create repository. Response:"
+  echo "$REPO_RESP" | jq '.'
+  exit 1
+fi
 sleep 2
 
 # 2) Register webhook
@@ -68,10 +104,10 @@ for i in $(seq 1 "$NUM_PRS"); do
   PR_NUMS+=("$PR_NUM")
   echo "     → PR #${PR_NUM}"
   git checkout main
-  sleep 2
+  sleep 1
 done
 
-sleep 3
+sleep 1
 
 echo
 # APPROACH 1: Empty commits + push
@@ -93,7 +129,7 @@ for idx in "${!BRANCHES[@]}"; do
     sleep 2
   done
 done
-sleep 5
+sleep 1
 
 echo
 # APPROACH 2: Force push patterns
@@ -107,15 +143,15 @@ for idx in "${!BRANCHES[@]}"; do
   git add "force-test.txt"
   git commit -m "feat: force push test for PR #${PR_NUM}"
   git push origin "$BR"
-  sleep 2
+  sleep 1
   git commit --amend -m "feat: amended force push test for PR #${PR_NUM}"
   git push --force origin "$BR"
-  sleep 2
+  sleep 1
   git commit --amend -m "feat: amended again force push test for PR #${PR_NUM}"
   git push --force origin "$BR"
-  sleep 2
+  sleep 1
 done
-sleep 5
+sleep 2
 
 echo
 # APPROACH 3: Rapid concurrent operations
@@ -141,7 +177,7 @@ for idx in "${!BRANCHES[@]}"; do
   wait
   sleep 2
 done
-sleep 5
+sleep 2
 
 echo
 # APPROACH 4: Rebase operations
@@ -158,15 +194,15 @@ for idx in "${!BRANCHES[@]}"; do
   git add "rebase2.txt"
   git commit -m "rebase: commit 2 for PR #${PR_NUM}"
   git push origin "$BR"
-  sleep 2
+  sleep 1
   git reset --hard HEAD~2
   echo "rebased content $(date)" > "rebased.txt"
   git add "rebased.txt"
   git commit -m "rebase: squashed commits for PR #${PR_NUM}"
   git push --force origin "$BR"
-  sleep 2
+  sleep 1
 done
-sleep 5
+sleep 2
 
 echo
 # APPROACH 5: Direct refs manipulation
@@ -180,14 +216,14 @@ for idx in "${!BRANCHES[@]}"; do
   git add "refs.txt"
   git commit -m "refs: test for PR #${PR_NUM}"
   git push origin "$BR"
-  sleep 2
+  sleep 1
   echo "refs test 2 $(date)" > "refs2.txt"
   git add "refs2.txt"
   git commit -m "refs: test 2 for PR #${PR_NUM}"
   NEW_SHA=$(git rev-parse HEAD)
   curl -k -s -X PATCH -H "$AUTH" "$API/repos/${ORG}/${REPO}/git/refs/heads/${BR}" \
     -d "{\"sha\":\"${NEW_SHA}\",\"force\":true}" >/dev/null
-  sleep 3
+  sleep 2
 done
 
 # Final summary
