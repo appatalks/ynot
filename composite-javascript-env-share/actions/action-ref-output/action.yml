@@ -1,0 +1,26 @@
+name: 'GitHub Action Ref Output'
+description: 'Outputs the github.action_ref value for the current workflow run'
+outputs:
+  action_ref:
+    description: 'The git ref (branch, tag or commit SHA) that triggered this action'
+    value: ${{ steps.run-script.outputs.action_ref }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+      
+    - name: Install Dependencies
+      run: |
+        cd ${{ github.action_path }}
+        npm install @actions/core @actions/github
+      shell: bash
+      
+    - name: Run Script
+      id: run-script
+      run: |
+        cd ${{ github.action_path }}
+        node index.js
+      shell: bash

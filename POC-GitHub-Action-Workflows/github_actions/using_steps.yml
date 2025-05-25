@@ -1,0 +1,50 @@
+# https://learn.microsoft.com/en-us/training/modules/github-actions-cd/2-deploy-azure
+# https://docs.github.com/en/actions/learn-github-actions/expressions
+# Status Check Functions:
+#   if: ${{ success() }}
+#   if: ${{ always() }}
+#   if: ${{ !cancelled() }}
+#   if: ${{ cancelled() }}
+#   if: ${{ failure() }}   
+
+name: Using Steps Example
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION : "us-east-1"
+
+# permission can be added at job level or workflow level    
+permissions:
+      id-token: write   # This is required for requesting the JWT
+      contents: read    # This is required for actions/checkout
+      
+jobs:
+  TaskLists:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: configure aws credentials
+      uses: aws-actions/configure-aws-credentials@v3
+      with:
+        role-to-assume: arn:aws:iam::******:role/OIDC-GitHub-Role
+        role-session-name: oidc-github
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get sts identity  
+      if: success()
+      run: |
+          aws sts get-caller-identity
+          
+    - name: Get Runner Date
+      if: success()
+      run: |
+          date
+          
+    - name: Grab Runner IP
+      if: success()
+      run: |
+          IP=$(curl -s https://icanhazip.com/)
+          echo $IP

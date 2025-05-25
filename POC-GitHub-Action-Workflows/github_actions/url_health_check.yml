@@ -1,0 +1,112 @@
+name: URL Health Check
+on:
+  # schedule:
+  # - cron: 0/5 0 * * * 
+   
+  workflow_dispatch:
+  
+    inputs:
+      url:
+        description: 'URL to check'
+        required: false
+        default: 'https://example.com/' # Default URL, change as needed
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    permissions: 
+      issues: write
+      contents: write
+      actions: write
+      checks: write
+      pull-requests: write
+      statuses: write
+ 
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install Dependencies
+        run: | 
+          npm install
+
+      - name: Check URL Health
+        id: healthcheck
+        run: |
+          URL_TO_CHECK="${{ github.event.inputs.url }}"
+          node healthcheck.js
+        env:
+          URL_TO_CHECK: ${{ github.event.inputs.url_to_check }}  
+
+      - name: Debug Screenshot File
+        if: failure()
+        run: |
+          if [ -f screenshot.png ]; then
+            echo "Screenshot file exists."
+            ls -l screenshot.png
+          else
+            echo "Screenshot file does not exist."
+          fi 
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+            name: screenshot
+            path: screenshot.png    
+
+      - name: git upload
+        env: 
+          CI_COMMIT_AUTHOR: GitHub-Bot
+          CI_COMMIT_EMAIL: ${{ secrets.EMAIL }}
+        if: failure()
+        run: |
+          git config --global user.name "${{ env.CI_COMMIT_AUTHOR }}"
+          git config --global user.email "${{ env.CI_COMMIT_EMAIL }}"
+          git checkout -b assets
+          git add screenshot.png
+          git commit -m "screenshot added"
+          git push origin assets --force
+          
+      - name: Create Issue on Failure
+        if: failure()
+        id: createissue
+        uses: actions/github-script@0.8.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs').promises;
+            const { owner, repo } = context.repo;
+            const status = await fs.readFile('STATUS_CODE.txt', 'utf8');
+            const failedUrls = await fs.readFile('FAILED_URLS.txt', 'utf8');
+
+            // Construct the URL to the screenshot in your repository
+            const screenshotUrl = `https://raw.githubusercontent.com/${owner}/${repo}/assets/screenshot.png`;
+
+            // Define the tag you want to add (e.g., "CRITICAL_TAG")
+            const tag = 'CRITICAL';
+
+            // Create the issue body with an HTML img tag to display the screenshot
+            const body = `
+              <p>Failed URLs:</p>
+              <pre>${failedUrls}</pre>
+              <p>Status Code:</p>
+              <pre>${status}</pre>
+              <p>Screenshot:</p><br>
+              
+              ![screenshot](${screenshotUrl})
+            `;
+
+            // Create the issue with the modified body
+            const issue = await github.issues.create({
+              owner,
+              repo,
+              title: 'URL Health Check Failure',
+              body,
+              labels: [tag],
+            });

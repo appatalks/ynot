@@ -1,0 +1,60 @@
+name: Repository Protected Tags Discovery
+on:
+  workflow_dispatch:
+    inputs:
+      orgName:
+        description: 'Target Organization'
+        required: true
+        default: ''
+        type: string
+
+jobs:
+  list-repos:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JQ
+      run: |
+        sudo apt-get install jq
+
+    - name: Execute script
+      run: |
+        url="https://api.github.com/orgs/${{ inputs.orgName }}/repos"
+        repos=$(curl -s -H "Authorization: token ${{ secrets.PATLANG }}" $url | jq -r '.[] | .name, .private')
+        if [ -z "$repos" ]; then
+          echo "No repositories found for this organization, or the organization does not exist."
+        else
+          echo "Repository Name,Visibility,Protected Tags" > org_repo_report.csv
+          arr=($repos)
+          for ((i=0; i<${#arr[@]}; i+=2)); do
+            visibility="Public"
+            if [ "${arr[$i+1]}" = "true" ]; then
+              visibility="Private"
+            fi
+            repoName="${arr[$i]}"
+            tagProtectionRules=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.PATLANG }}" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${{ inputs.orgName }}/$repoName/tags/protection" | jq -r '.[]')
+            tagProtection="Disabled"
+            tagName=""
+            for rule in "${tagProtectionRules[@]}"
+            do
+              enabled=$(echo "$rule" | jq -r '.pattern')
+              if [ ! -z "$enabled" ]; then
+                tagProtection="Enabled"
+                tagName=$(echo $enabled | tr ' ' ',')
+              fi
+            done
+            echo "$repoName,$visibility,$tagProtection,$tagName" >> org_repo_report.csv
+          done
+          cat org_repo_report.csv
+        fi
+
+    - name: Upload CSV
+      if: success()
+      id: csv
+      uses: actions/upload-artifact@v4
+      with:
+        name: org_repo_report.csv
+        path: org_repo_report.csv
+        # retention-days: 42

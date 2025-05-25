@@ -1,0 +1,32 @@
+name: Dispatch Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      checkType:
+        description: 'Type of check to perform'
+        required: true
+        default: 'basic'
+
+jobs:
+  trigger-test-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Trigger Test Check
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'test-check.yml',
+              ref: 'main', // Use the appropriate branch
+              inputs: {
+                checkType: context.payload.inputs.checkType,
+              }
+            });

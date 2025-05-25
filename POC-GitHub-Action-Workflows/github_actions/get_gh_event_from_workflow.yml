@@ -1,0 +1,17 @@
+name: Get GH Event from Workflow ex CodeQL
+on:
+  workflow_run:
+    workflows: ["CodeQL"]
+    types: 
+      - completed
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Print Payload
+        env:
+          PAYLOAD: ${{ toJson(github.event) }}
+        run: echo "$PAYLOAD"

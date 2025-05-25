@@ -1,0 +1,29 @@
+# Permissions https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs
+
+name: Get-Hosts-file
+  
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      
+    steps:
+      - name: get_hosts_debug
+        id: get_hosts_debug
+        run: |
+          sed '/^\s*#/d; /^\s*$/d' /etc/hosts
+          sed '/^\s*#/d; /^\s*$/d' /etc/hosts > /tmp/gh_actions_run.md
+          
+      - name: Update Issue
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          append-separator: none
+          body-path: "/tmp/gh_actions_run.md"

@@ -1,0 +1,29 @@
+version: '3.3'
+services:
+  flask:
+    # network_mode: host # Enable networking with host
+    build: 
+      context: . 
+      dockerfile: Dockerfile.flask
+    environment:
+      FLASK_APP: api_fifo_server.py
+      FLASK_ENV: production
+      DB_HOST: 
+      DB_USER: api_gateway
+      DB_PASSWORD: your_mysql_password
+      DB_NAME: api_gateway_fifo
+    volumes:
+      - ./logs:/home/lab/logs
+
+  nginx:
+    build:  
+      context: .
+      dockerfile: Dockerfile.nginx
+    ports:
+      - "443:443"
+    depends_on:
+      - flask
+
+volumes:
+  logs:
+    driver: local

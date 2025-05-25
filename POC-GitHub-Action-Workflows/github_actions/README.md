@@ -1,0 +1,23 @@
+- [cat_hosts.yml](cat_hosts.yml) - Cat the runner's /etc/hosts file
+- [close_pull_request.yml](close_pull_request.yml) - Auto close a pull request No Merge
+- [context_testing.yml](context_testing.yml) - Dump out all of GitHub's Contexts
+- [get_gh_event_from_workflow.yml](get_gh_event_from_workflow.yml) - If a certain workflow runs, get it's events/payload
+- [greetings_actions_first.yml](greetings_actions_first.yml) - Auto response to a pull request or issue
+- [hello_world.yml](hello_world.yml) - Simple Hello world action
+- [inputs_custom_script.yml](inputs_custom_script.yml) - Use inputs to use elsewhere in the action
+- [markdown_step_summary.yml](markdown_step_summary.yml) - Create a markdown summary for copy/pasta
+- [multi_jobs.yml](multi_jobs.yml) - Example of using multiple jobs
+- [octocat_rest.yml](octocat_rest.yml) - Using REST
+- [oidc_github_aws.yml](oidc_github_aws.yml) - OIDC Auth with AWS
+- [scheduled_issue.yml](scheduled_issue.yml) - Create an scheduled issue.
+- [test_ip.yml](test_ip.yml) - Test Runner IP
+- [upload_artifact.yml](upload_artifact.yml) - Upload an artifact
+- [upload_download_artifact.yml](upload_download_artifact.yml) - Upload an artifact and download it to different runner
+- [url_health_check.yml](url_health_check.yml) - Monitor URL health and create issue if non 200 with screenshot
+- [using_steps.yml](using_steps.yml) - Multiple Steps example
+- [list_repo_languages.yml](list_repo_languages.yml) - List the Repo's Languages by percentage
+- [list_branch_languages.yml](list_branch_languages.yml) - Uses ```github-linguist --breakdown``` to iterate through each branch
+- [secret_scanning_check.yml](secret_scanning_check.yml) - Add a GH Secrets Scanning Check to your PRs! No, Seriously do Itz!
+- [org_repo_protected_tag_discovery.yml](org_repo_protected_tag_discovery.yml) - Run an Org wide discovery for Protected Tags using [secrets.PATLANG](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions)
+- [test_action_endpoints.yml](test_action_endpoints.yml) - Use this to test various endpoints that Actions may use.
+- [call_a_workflow.yml](call_a_workflow.yml) - Call another workflow action from within a workflow action.

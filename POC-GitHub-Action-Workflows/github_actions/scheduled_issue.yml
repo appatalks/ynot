@@ -1,0 +1,38 @@
+# https://docs.github.com/en/actions/managing-issues-and-pull-requests/scheduling-issue-creation
+
+name: Scheduled Issue
+on:
+  # schedule:
+  # Every day at noon
+  # - cron: 0 12 * * * 
+  workflow_dispatch:
+
+jobs:
+  daily_standup:
+    name: Scheduled Issue
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Today's date
+      run: echo "TODAY=$(date '+%Y-%m-%d')" >> $GITHUB_ENV
+
+    # Generates and pins new standup issue, closes previous, writes linking comments, and assigns to all assignees in list
+    - name: Scheduled Issue
+      uses: imjohnbo/issue-bot@v3.4.3
+      with:
+        # assignees: "monacat"
+        labels: "Time Sensitive"
+        title: Scheduled Issue
+        body: |-
+          :wave: Hi, {{#each assignees}}@{{this}}{{#unless @last}}, {{/unless}}{{/each}}!
+
+          ## This is a time sensitve scheduled Issue for ${{ env.TODAY }}
+
+          1. Why was this issue created?
+          2. What do you need to do?
+          3. How do you do it?
+          4. Document.
+          
+        pinned: true
+        close-previous: true
+        linked-comments: true

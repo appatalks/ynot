@@ -1,0 +1,53 @@
+# $GITHUB_ENV = For later steps
+# $GITHUB_OUTPUT = For multiple jobs
+# $GITHUB_STEP_SUMMARY = Provides Markdown
+
+name: Disk Report in Markdown
+  
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # permissions:
+    #  issues: write
+    #  pull-requests: write
+      
+    steps:
+
+      - name: disk
+        id: disk
+        run: |
+          { 
+            echo 'DISK_USE<<EOF'
+            df -h > disk_usage.txt
+            echo "## Disk Usage" > disk_usage.md
+            echo '```plaintext' >> disk_usage.md
+            cat disk_usage.txt >> disk_usage.md
+            echo '```' >> disk_usage.md  
+            cat disk_usage.md
+            echo EOF
+          } >> "$GITHUB_ENV"
+    
+      - name: Command
+        id: command
+        run: |
+          echo "ELO=$(echo "Hello World! :tada:")" >> "$GITHUB_OUTPUT"
+
+      - name: Set emoji
+        id: emoji
+        run: |
+          echo "SELECTED_EMOJI=$(echo ":penguin:")" >> "$GITHUB_OUTPUT"          
+          
+      - name: finished
+        if: success()
+        env:
+          ELO: ${{ steps.command.outputs.ELO }}
+          SELECTED_EMOJI: ${{ steps.emoji.outputs.SELECTED_EMOJI }}
+          
+        run: |
+          echo "$ELO" >> $GITHUB_STEP_SUMMARY
+          echo "$DISK_USE" >> $GITHUB_STEP_SUMMARY
+          echo "The selected emoji is $SELECTED_EMOJI" >> $GITHUB_STEP_SUMMARY

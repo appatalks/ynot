@@ -1,0 +1,25 @@
+name: Complex
+  
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: get_ip
+        id: get_ip
+        run: |
+          IP=$(curl -s https://icanhazip.com/)
+          echo "::set-output name=ip::$IP"
+      
+      - name: Update Issue
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: "The IP address is ${{ steps.get_ip.outputs.ip }}"

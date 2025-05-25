@@ -1,0 +1,18 @@
+
+name: Example Workflow
+
+on:
+  workflow_dispatch:
+  
+jobs:
+  output-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Get Action Ref
+        id: get_ref
+        uses: ./.github/actions/action-ref-output
+        
+      - name: Use the Action Ref
+        run: echo "The action ref is ${{ steps.get_ref.outputs.action_ref }}"

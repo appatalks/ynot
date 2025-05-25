@@ -1,0 +1,13 @@
+{
+  "name": "github-action-ref-output",
+  "version": "1.0.0",
+  "description": "A GitHub Action to output github.action_ref",
+  "main": "index.js",
+  "keywords": [
+    "GitHub",
+    "Actions",
+    "JavaScript"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,51 @@
+name: Check Branches Languages
+
+on:  
+  workflow_dispatch:
+
+jobs:
+  get_branches:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.get-branches.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List all branches
+        id: get-branches
+        run: |
+          # echo "::set-output name=matrix::{\"branches\":$(git branch -r | grep -v HEAD | sed 's/origin\///' | jq -R -s -c 'split("\n")[:-1]')}"
+          echo "matrix={\"branches\":$(git branch -r | grep -v HEAD | sed 's/origin\///' | jq -R -s -c 'split("\n")[:-1]')}" >> $GITHUB_OUTPUT
+  branch:
+    needs: get_branches
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.get_branches.outputs.matrix)}}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Review Branches
+        id: review
+        run: |
+          echo "Starting run"
+          sudo apt-get install build-essential cmake pkg-config libicu-dev zlib1g-dev libcurl4-openssl-dev libssl-dev ruby-dev
+          sudo gem install github-linguist
+          SUMMARY="" 
+          for branch in "${{ matrix.branches }}"; do
+            echo "Checking out branch $branch"
+            git checkout $branch
+            ls -lah
+            github-linguist --breakdown
+            LINGUIST_OUTPUT=$(github-linguist --breakdown)
+            SUMMARY="$SUMMARY\n$branch: $LINGUIST_OUTPUT"
+          done
+          echo "summary=$(echo $SUMMARY)" >> $GITHUB_OUTPUT
+         
+      - name: Set GITHUB_STEP_SUMMARY
+        run: echo "${{ steps.review.outputs.summary }}" | awk '{print $2,$3,$5}' >> $GITHUB_STEP_SUMMARY

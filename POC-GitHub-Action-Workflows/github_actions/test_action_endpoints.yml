@@ -1,0 +1,15 @@
+name: Curl Test for Actions Endpoints
+
+on: 
+   workflow_dispatch:
+
+jobs:
+  run-curl:
+    runs-on: <YOUR_RUNNER_LABEL>  <--------- REPLACE WITH YOUR RUNNER LABEL
+    strategy:
+      matrix:
+        runs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    steps:
+    - name: Run curl command
+      run: curl -vI https://pipelinesghubeus2.actions.githubusercontent.com/

@@ -1,0 +1,62 @@
+# https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#providing-inputs
+
+name: Inputs Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+        - info
+        - warning
+        - debug
+      tags:
+        description: 'Test scenario tags'
+        required: false
+        type: boolean
+      environment:
+        description: 'Environment to run tests against'
+        type: environment
+        required: true
+      run:
+        description: 'Run Something'
+        required: true
+        default: 'date'
+        type: choice
+        options:
+        - date
+        - df -h
+        - curl -s https://icanhazip.com/
+        - echo "Running Custom Script"
+      customRun:
+        description: 'CAREFUL / Run Something Custom / CAREFUL'
+        required: false
+        default: 'date'
+        type: string
+
+jobs:
+  log-the-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Log level: $LEVEL"
+          echo "Tags: $TAGS"
+          echo "Environment: $ENVIRONMENT"
+        env:
+          LEVEL: ${{ inputs.logLevel }}
+          TAGS: ${{ inputs.tags }}
+          ENVIRONMENT: ${{ inputs.environment }}
+      - run: |
+          echo "Running: $RUN"
+          $RUN
+        env:
+          RUN: ${{ inputs.run }}
+      - run: |
+          echo "Running: $CUSTOMRUN"
+          $CUSTOMRUN
+        env:
+          CUSTOMRUN: ${{ inputs.customRun }}

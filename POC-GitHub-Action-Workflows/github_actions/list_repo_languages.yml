@@ -1,0 +1,66 @@
+# Working on adding ability to run against many URLs. Updates to come soon!
+
+name: List Repository Languages
+on:
+  workflow_dispatch:
+    inputs:
+      repo-url:
+        description: 'Repository URL'
+        required: true
+        default: ''
+        type: string
+
+jobs:
+  list-languages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract owner and repo from URL
+        id: extract
+        run: |
+          URL="${{ inputs.repo-url }}"
+          # Extract owner and repo from the URL
+          OWNER=$(echo $URL | awk -F/ '{print $4}')
+          REPO=$(echo $URL | awk -F/ '{print $5}')
+          echo "Extracted OWNER: $OWNER"
+          echo "Extracted REPO: $REPO"
+          echo "OWNER=$OWNER" >> $GITHUB_ENV
+          echo "REPO=$REPO" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Get repository languages
+        id: languages
+        run: |
+          { 
+            echo 'RESPONSE<<EOF'
+            curl -L \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/$OWNER/$REPO/languages 
+            echo EOF
+          } >> "$GITHUB_ENV"
+                
+      - name: Format repository languages
+        id: format
+        if: success()
+        run: |
+         { 
+            echo 'F_RESULTS<<EOF'
+            # Calculate the total lines of code
+            total_lines=$(echo "$RESPONSE" | jq 'values | add')
+            # echo "Language Percentage in Repository:"
+            echo "$RESPONSE" | jq -r 'to_entries[] | "\(.key): \(.value / '"$total_lines"' * 100.0)%"' | while read line; do
+              language=$(echo "$line" | awk -F ': ' '{print $1}')
+              percentage=$(echo "$line" | awk -F ': ' '{printf "%.2f", $2}')
+              printf "%s: %s%%\n" "$language" "$percentage"
+            done
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - name: Print repository languages 
+        if: success()
+        run: |
+          echo "Languages in $OWNER/$REPO:" >> $GITHUB_STEP_SUMMARY
+          echo "$F_RESULTS" >> $GITHUB_STEP_SUMMARY

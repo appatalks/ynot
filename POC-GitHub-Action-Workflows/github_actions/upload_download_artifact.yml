@@ -1,0 +1,67 @@
+name: Upload / Download Arifact Example
+on:
+  workflow_dispatch:
+
+jobs:
+  UploadArtifact:
+    runs-on: ubuntu-latest
+      
+    steps:
+      - name: Check Runner Heatlh
+        id: runner_health
+        run: |
+          echo "::set-output name=cpu_stats::$(cat /proc/cpuinfo)"
+          echo "::set-output name=io_stats::$(iostat)"
+
+      - name: Generate Artifact
+        id: generate_report
+        run: |
+          echo "## Runner Health Report" > report.md
+          echo "" >> report.md
+          echo "### CPU Statistics" >> report.md
+          echo "\`\`\`" >> report.md
+          echo "${{ steps.runner_health.outputs.cpu_stats }}" >> report.md
+          echo "\`\`\`" >> report.md
+          echo "" >> report.md
+          echo "### IO Statistics" >> report.md
+          echo "\`\`\`" >> report.md
+          echo "${{ steps.runner_health.outputs.io_stats }}" >> report.md
+          echo "\`\`\`" >> report.md
+          
+      - name: Upload Report Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: runner-health-report
+          path: report.md
+          # retention-days: 42
+
+      # For use with Self-Hosted Runners    
+      # - name: Upload logs
+      #  uses: actions/upload-artifact@v3
+      #  with:
+      #    path: <path_to_runner_installation>/_diag/*.log    
+
+      - name: If Success
+        if: success()
+        run: |
+            echo "Upload Successful"
+          
+  DownloadArtifact:
+    needs: UploadArtifact
+    
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install pandoc for Markdown
+      run: |
+          sudo apt-get install pandoc -y
+
+    - uses: actions/download-artifact@v3
+      with:
+        name: runner-health-report
+        
+    - name: Read downloaded files
+      run: |
+          pandoc -t plain report.md
