@@ -176,12 +176,26 @@ for i in $(seq 1 "$NUM_ISSUES"); do
   # Generate body based on complexity
   BODY=$(generate_issue_body "$COMPLEXITY" "$i")
   
-  # Create the issue
+  # Properly escape the body content for JSON
+  BODY_ESCAPED=$(echo -n "$BODY" | jq -R -s '.')
+  
+  # Convert comma-separated labels to JSON array
+  LABELS_JSON="["
+  IFS=',' read -ra LABEL_ARRAY <<< "$LABELS"
+  for idx in "${!LABEL_ARRAY[@]}"; do
+    if [[ $idx -gt 0 ]]; then
+      LABELS_JSON+=","
+    fi
+    LABELS_JSON+="\"${LABEL_ARRAY[$idx]}\""
+  done
+  LABELS_JSON+="]"
+  
+  # Create the issue with properly formatted JSON
   ISSUE_RESP=$(curl -k -s -X POST -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}/issues" \
     -d "{
       \"title\":\"${TITLE}\",
-      \"body\":\"${BODY}\",
-      \"labels\":[${LABELS//,/\",\"}]
+      \"body\":${BODY_ESCAPED},
+      \"labels\":${LABELS_JSON}
     }")
   
   ISSUE_NUM=$(echo "$ISSUE_RESP" | jq -r '.number // empty')
@@ -200,8 +214,11 @@ for i in $(seq 1 "$NUM_ISSUES"); do
     TEMPLATE_IDX=$(( (j-1) % ${#COMMENT_TEMPLATES[@]} ))
     COMMENT=$(printf "${COMMENT_TEMPLATES[$TEMPLATE_IDX]}" "$((i+j))" "$((i*2+j))")
     
+    # Properly escape the comment for JSON
+    COMMENT_ESCAPED=$(echo -n "$COMMENT" | jq -R -s '.')
+    
     curl -k -s -X POST -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}/issues/${ISSUE_NUM}/comments" \
-      -d "{\"body\":\"${COMMENT}\"}" >/dev/null
+      -d "{\"body\":${COMMENT_ESCAPED}}" >/dev/null
     sleep 1
   done
   
@@ -209,8 +226,11 @@ for i in $(seq 1 "$NUM_ISSUES"); do
   if [[ "$COMPLEXITY" = "complex" ]]; then
     CODE_COMMENT="Here's a code sample that demonstrates the issue:\n\n\`\`\`javascript\nfunction demonstrateIssue() {\n  const data = fetchLargeDataset();\n  // This is inefficient and causes the crash\n  const processed = data.map(item => transformItem(item));\n  return processed.filter(item => item.isValid);\n}\n\`\`\`"
     
+    # Properly escape the comment for JSON
+    CODE_COMMENT_ESCAPED=$(echo -n "$CODE_COMMENT" | jq -R -s '.')
+    
     curl -k -s -X POST -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}/issues/${ISSUE_NUM}/comments" \
-      -d "{\"body\":\"${CODE_COMMENT}\"}" >/dev/null
+      -d "{\"body\":${CODE_COMMENT_ESCAPED}}" >/dev/null
   fi
   
   # Close issue if state should be closed

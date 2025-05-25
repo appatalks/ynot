@@ -41,7 +41,9 @@ TEAM_TEMPLATES=(
 PRIVACY_OPTIONS=("closed" "secret")
 
 # Team permission options
-PERMISSION_OPTIONS=("pull" "push" "admin" "maintain" "triage")
+# GitHub API only accepts pull, push, admin for repository permissions
+# maintain and triage are not valid for team creation
+PERMISSION_OPTIONS=("pull" "push" "admin")
 
 # Load list of users from generated-users.txt if it exists
 USERS=()
@@ -68,7 +70,10 @@ for i in $(seq 1 "$NUM_TEAMS"); do
   TEMPLATE_IDX=$(( (i-1) % ${#TEAM_TEMPLATES[@]} ))
   PREFIX="${TEAM_PREFIXES[$PREFIX_IDX]}"
   TEMPLATE="${TEAM_TEMPLATES[$TEMPLATE_IDX]}"
+  # Ensure team name only contains alphanumeric characters, hyphens, and underscores
   TEAM_NAME=$(printf "$TEMPLATE" "$PREFIX")-"${TS:(-4)}"
+  # Remove any invalid characters
+  TEAM_NAME=$(echo "$TEAM_NAME" | tr -cd 'a-zA-Z0-9-_')
   
   # Set privacy and permission
   PRIVACY=${PRIVACY_OPTIONS[$(( i % ${#PRIVACY_OPTIONS[@]} ))]}
@@ -102,14 +107,20 @@ for i in $(seq 1 "$NUM_TEAMS"); do
     for j in $(seq 1 2); # Create 2 child teams
       do
         CHILD_NAME="${TEAM_NAME}-sub${j}"
+        # Remove any invalid characters from child team name
+        CHILD_NAME=$(echo "$CHILD_NAME" | tr -cd 'a-zA-Z0-9-_')
         CHILD_PRIVACY=${PRIVACY_OPTIONS[$(( (i+j) % ${#PRIVACY_OPTIONS[@]} ))]}
         
         echo "       • Creating child team: $CHILD_NAME"
+        # Use a valid permission for child teams
+        CHILD_PERMISSION=${PERMISSION_OPTIONS[$(( (i+j) % ${#PERMISSION_OPTIONS[@]} ))]}
+        
         CHILD_RESP=$(curl -k -s -X POST -H "$AUTH" "$API/orgs/${ORG}/teams" \
           -d "{
             \"name\":\"${CHILD_NAME}\",
             \"description\":\"Child team ${j} of ${TEAM_NAME}\",
             \"privacy\":\"${CHILD_PRIVACY}\",
+            \"permission\":\"${CHILD_PERMISSION}\",
             \"parent_team_id\":${TEAM_ID}
           }")
         
@@ -168,7 +179,9 @@ for i in $(seq 1 "$NUM_TEAMS"); do
       REPO="${REPO_NAMES[$REPO_IDX]}"
       
       # Vary the permissions for repos within teams
-      REPO_PERMISSION=${PERMISSION_OPTIONS[$(( (i + j) % ${#PERMISSION_OPTIONS[@]} ))]}
+      # For repository permissions, we can use pull, push, admin, maintain, triage
+      REPO_PERMISSIONS=("pull" "push" "admin" "maintain" "triage")  
+      REPO_PERMISSION=${REPO_PERMISSIONS[$(( (i + j) % ${#REPO_PERMISSIONS[@]} ))]}
       
       echo "       • Adding $REPO with $REPO_PERMISSION permission"
       
