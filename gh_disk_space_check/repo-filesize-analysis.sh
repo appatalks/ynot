@@ -18,8 +18,12 @@ files_over_max=0
 files_between=0
 
 # Track repositories with specific file sizes
-repos_over_max=""
-repos_between=""
+repos_over_max_ids=""
+repos_between_ids=""
+
+# Arrays to store repo IDs for later name resolution
+declare -a repo_ids_over_max
+declare -a repo_ids_between
 
 echo "Analyzing repositories in /data/user/repositories..."
 echo "Total repository storage: $(sudo du -hsx /data/user/repositories/)"
@@ -39,15 +43,18 @@ echo "Found $TOTAL_REPOS repositories to analyze"
 # Create temporary files to store results
 over_max_file="/tmp/repos_over_${SIZE_MAX_MB}mb.txt"
 between_file="/tmp/repos_${SIZE_MIN_MB}mb_to_${SIZE_MAX_MB}mb.txt"
-sudo touch $over_max_file $between_file
-sudo chmod 666 $over_max_file $between_file
-> $over_max_file
-> $between_file
+sudo touch ${over_max_file}.tmp ${between_file}.tmp
+sudo chmod 666 ${over_max_file}.tmp ${between_file}.tmp
+> ${over_max_file}.tmp
+> ${between_file}.tmp
 
 # Process each repository
+echo "Starting repository analysis..."
+repo_count=0
 for REPO in $REPOS; do
+    repo_count=$((repo_count + 1))
     REPO_NAME=$(echo "$REPO" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
-    echo "Checking $REPO_NAME..."
+    echo "[$repo_count/$TOTAL_REPOS] Checking $REPO_NAME..."
     
     has_file_over_max=0
     has_file_between=0
@@ -63,21 +70,12 @@ for REPO in $REPOS; do
                 size_mb=$((size_bytes / 1024 / 1024))
                 file_path=$(echo "$file" | sed "s|$REPO/||")
                 
-                # Get repository name with owner using ghe-nwo if available
-                REPO_DISPLAY_NAME=$REPO_NAME
-                if command -v ghe-nwo &> /dev/null; then
-                    GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
-                    if [ -n "$GHE_NWO" ]; then
-                        REPO_DISPLAY_NAME=$GHE_NWO
-                    fi
-                fi
-                
                 if [ "$size_bytes" -ge "$SIZE_MAX_BYTES" ]; then
-                    echo "$REPO_DISPLAY_NAME: $file_path ($size_mb MB)" >> $over_max_file
+                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $over_max_file.tmp
                     files_over_max=$((files_over_max + 1))
                     has_file_over_max=1
                 elif [ "$size_bytes" -ge "$SIZE_MIN_BYTES" ]; then
-                    echo "$REPO_DISPLAY_NAME: $file_path ($size_mb MB)" >> $between_file
+                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $between_file.tmp
                     files_between=$((files_between + 1))
                     has_file_between=1
                 fi
@@ -103,21 +101,12 @@ for REPO in $REPOS; do
                 if [ -n "$filename" ]; then
                     size_mb=$((size / 1024 / 1024))
                     
-                    # Get repository name with owner using ghe-nwo if available
-                    REPO_DISPLAY_NAME=$REPO_NAME
-                    if command -v ghe-nwo &> /dev/null; then
-                        GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
-                        if [ -n "$GHE_NWO" ]; then
-                            REPO_DISPLAY_NAME=$GHE_NWO
-                        fi
-                    fi
-                    
                     if [ $size -ge $SIZE_MAX_BYTES ]; then
-                        echo "$REPO_DISPLAY_NAME: $filename ($size_mb MB)" >> $over_max_file
+                        echo "$REPO_NAME: $filename ($size_mb MB)" >> $over_max_file.tmp
                         files_over_max=$((files_over_max + 1))
                         has_file_over_max=1
                     elif [ $size -ge $SIZE_MIN_BYTES ]; then
-                        echo "$REPO_DISPLAY_NAME: $filename ($size_mb MB)" >> $between_file
+                        echo "$REPO_NAME: $filename ($size_mb MB)" >> $between_file.tmp
                         files_between=$((files_between + 1))
                         has_file_between=1
                     fi
@@ -131,30 +120,65 @@ for REPO in $REPOS; do
         repos_with_files_over_max=$((repos_with_files_over_max + 1))
         repos_with_files_over_min=$((repos_with_files_over_min + 1))
         
-        # Get repository name with owner using ghe-nwo if available
-        REPO_DISPLAY_NAME=$REPO_NAME
-        if command -v ghe-nwo &> /dev/null; then
-            GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
-            if [ -n "$GHE_NWO" ]; then
-                REPO_DISPLAY_NAME=$GHE_NWO
-            fi
-        fi
-        repos_over_max="$repos_over_max $REPO_DISPLAY_NAME"
+        # Store repository ID for later name resolution
+        repos_over_max_ids="$repos_over_max_ids $REPO_NAME"
+        repo_ids_over_max+=("$REPO")
     elif [ $has_file_between -eq 1 ]; then
         repos_with_files_between=$((repos_with_files_between + 1))
         repos_with_files_over_min=$((repos_with_files_over_min + 1))
         
-        # Get repository name with owner using ghe-nwo if available
-        REPO_DISPLAY_NAME=$REPO_NAME
-        if command -v ghe-nwo &> /dev/null; then
-            GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
-            if [ -n "$GHE_NWO" ]; then
-                REPO_DISPLAY_NAME=$GHE_NWO
-            fi
-        fi
-        repos_between="$repos_between $REPO_DISPLAY_NAME"
+        # Store repository ID for later name resolution
+        repos_between_ids="$repos_between_ids $REPO_NAME"
+        repo_ids_between+=("$REPO")
     fi
 done
+
+# Post-processing: Convert repository IDs to names using ghe-nwo
+echo "Converting repository IDs to human-readable names..."
+repos_over_max=""
+repos_between=""
+
+if command -v ghe-nwo &> /dev/null; then
+    # Process repositories with files over max size
+    if [ ${#repo_ids_over_max[@]} -gt 0 ]; then
+        echo "Processing ${#repo_ids_over_max[@]} repositories with large files..."
+        for repo in "${repo_ids_over_max[@]}"; do
+            repo_name=$(echo "$repo" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
+            if [ -n "$nwo" ]; then
+                repos_over_max="$repos_over_max $nwo"
+                # Replace repo ID with NWO in temp file
+                sudo sed -i "s|^$repo_name:|$nwo:|g" ${over_max_file}.tmp
+            else
+                repos_over_max="$repos_over_max $repo_name"
+            fi
+        done
+    fi
+    
+    # Process repositories with files between min and max size
+    if [ ${#repo_ids_between[@]} -gt 0 ]; then
+        echo "Processing ${#repo_ids_between[@]} repositories with medium files..."
+        for repo in "${repo_ids_between[@]}"; do
+            repo_name=$(echo "$repo" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
+            if [ -n "$nwo" ]; then
+                repos_between="$repos_between $nwo"
+                # Replace repo ID with NWO in temp file
+                sudo sed -i "s|^$repo_name:|$nwo:|g" ${between_file}.tmp
+            else
+                repos_between="$repos_between $repo_name"
+            fi
+        done
+    fi
+else
+    # If ghe-nwo is not available, use the IDs
+    repos_over_max="$repos_over_max_ids"
+    repos_between="$repos_between_ids"
+fi
+
+# Move temporary files to final files
+sudo mv ${over_max_file}.tmp ${over_max_file}
+sudo mv ${between_file}.tmp ${between_file}
 
 # Print summary report
 echo "======================================"
