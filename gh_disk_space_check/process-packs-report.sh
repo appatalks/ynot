@@ -52,9 +52,25 @@ fi
 
 # Check if resolve-pack-objects.sh exists and is executable
 RESOLVER_SCRIPT="$(dirname "$0")/resolve-pack-objects.sh"
+
 if [ ! -f "$RESOLVER_SCRIPT" ] || [ ! -x "$RESOLVER_SCRIPT" ]; then
-    echo "Error: resolve-pack-objects.sh not found or not executable at $RESOLVER_SCRIPT"
-    exit 1
+    echo "resolve-pack-objects.sh not found in the same directory. Attempting to download it..."
+    
+    # Create a temporary directory if needed
+    TEMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TEMP_DIR"' EXIT
+    
+    # Download the required script
+    curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
+    chmod +x "${TEMP_DIR}/resolve-pack-objects.sh"
+    
+    if [ -f "${TEMP_DIR}/resolve-pack-objects.sh" ] && [ -x "${TEMP_DIR}/resolve-pack-objects.sh" ]; then
+        echo "Successfully downloaded resolve-pack-objects.sh"
+        RESOLVER_SCRIPT="${TEMP_DIR}/resolve-pack-objects.sh"
+    else
+        echo "Error: Failed to download resolve-pack-objects.sh"
+        exit 1
+    fi
 fi
 
 # Output file

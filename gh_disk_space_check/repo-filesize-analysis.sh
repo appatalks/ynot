@@ -214,12 +214,35 @@ echo "Detailed report of files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $betwe
 if [ "$RESOLVE_OBJECTS" = "true" ]; then
     echo ""
     echo "Resolving Git pack objects..."
-    
-    # Check if we have the resolver script in the same directory
+
+    # First, try to find the resolver script in the same directory
     SCRIPT_DIR=$(dirname "$0")
     RESOLVER_SCRIPT="${SCRIPT_DIR}/process-packs-report.sh"
+    RESOLVER_SCRIPT2="${SCRIPT_DIR}/resolve-pack-objects.sh"
     
-    if [ -f "$RESOLVER_SCRIPT" ] && [ -x "$RESOLVER_SCRIPT" ]; then
+    # If not found, check if we're running from a curl pipe
+    if [ ! -f "$RESOLVER_SCRIPT" ] || [ ! -x "$RESOLVER_SCRIPT" ] || [ ! -f "$RESOLVER_SCRIPT2" ]; then
+        echo "Resolver scripts not found in local directory. Attempting to download from GitHub..."
+        
+        # Create a temporary directory
+        TEMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TEMP_DIR"' EXIT
+        
+        # Download the required scripts
+        echo "Downloading process-packs-report.sh..."
+        curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/process-packs-report.sh" -o "${TEMP_DIR}/process-packs-report.sh"
+        chmod +x "${TEMP_DIR}/process-packs-report.sh"
+        
+        echo "Downloading resolve-pack-objects.sh..."
+        curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
+        chmod +x "${TEMP_DIR}/resolve-pack-objects.sh"
+        
+        # Update the resolver script path
+        RESOLVER_SCRIPT="${TEMP_DIR}/process-packs-report.sh"
+        RESOLVER_SCRIPT2="${TEMP_DIR}/resolve-pack-objects.sh"
+    fi
+    
+    if [ -f "$RESOLVER_SCRIPT" ] && [ -x "$RESOLVER_SCRIPT" ] && [ -f "$RESOLVER_SCRIPT2" ] && [ -x "$RESOLVER_SCRIPT2" ]; then
         echo "Starting to resolve objects in files over ${SIZE_MAX_MB}MB..."
         $RESOLVER_SCRIPT -f "$over_max_file" -t "$TOP_OBJECTS"
         
@@ -231,9 +254,12 @@ if [ "$RESOLVE_OBJECTS" = "true" ]; then
         echo "Files over ${SIZE_MAX_MB}MB: ${over_max_file}_resolved.txt"
         echo "Files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: ${between_file}_resolved.txt"
     else
-        echo "Warning: resolver script not found at $RESOLVER_SCRIPT"
-        echo "To resolve Git objects, please run:"
-        echo "  process-packs-report.sh -f $over_max_file"
-        echo "  process-packs-report.sh -f $between_file"
+        echo "Warning: Failed to find or download resolver scripts"
+        echo "To manually resolve Git objects, run these commands:"
+        echo "  curl -s -L https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/process-packs-report.sh -o ~/process-packs-report.sh"
+        echo "  curl -s -L https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh -o ~/resolve-pack-objects.sh"
+        echo "  chmod +x ~/process-packs-report.sh ~/resolve-pack-objects.sh"
+        echo "  ~/process-packs-report.sh -f $over_max_file"
+        echo "  ~/process-packs-report.sh -f $between_file"
     fi
 fi

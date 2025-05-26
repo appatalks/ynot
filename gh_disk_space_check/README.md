@@ -28,7 +28,7 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 You can run the script directly from GitHub without cloning the repository. Use the following one-liner:
 
 ```sh
-time bash <(curl -sL https://github.com/appatalks/gh_disk_space_check/raw/main/disk_check.sh)
+time bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/disk_check.sh)
 ```
 
 ### Optional add to ```cron```
@@ -38,7 +38,7 @@ To run the script every ```15 minutes``` as the "**admin**" user, follow these s
 1. Download the script to `/home/admin`:
 
     ```sh
-    curl -sL https://github.com/appatalks/gh_disk_space_check/raw/main/disk_check.sh -o /home/admin/disk_check.sh
+    curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/disk_check.sh -o /home/admin/disk_check.sh
     chmod +x /home/admin/disk_check.sh
     ```
 
@@ -68,7 +68,7 @@ https://docs.rackspace.com/docs/troubleshooting-low-disk-space-for-a-linux-cloud
 
 ## License
 
-This project is licensed under the [GPL-3.0 license](https://github.com/appatalks/gh_disk_space_check/blob/50fff770e07c4b07178ae2939eab82fb45d4f92c/LICENSE).
+This project is licensed under the [GPL-3.0 license]().
 
 ## Repository Analysis Tools
 
@@ -87,6 +87,16 @@ SIZE_MIN_MB=25 SIZE_MAX_MB=100 sudo bash repo-filesize-analysis.sh
 SIZE_MIN_MB=25 SIZE_MAX_MB=100 RESOLVE_OBJECTS=true sudo bash repo-filesize-analysis.sh
 ```
 
+Run directly from GitHub (one-liner):
+
+```sh
+# Run with default thresholds
+sudo bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/repo-filesize-analysis.sh)
+
+# Run with custom thresholds and object resolution
+SIZE_MIN_MB=1 SIZE_MAX_MB=25 RESOLVE_OBJECTS=true sudo bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/repo-filesize-analysis.sh)
+```
+
 ### resolve-pack-objects.sh
 
 This tool helps you resolve Git pack objects to real filenames:
@@ -102,4 +112,12 @@ Process the output of repo-filesize-analysis.sh to get detailed information abou
 ```sh
 ./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt
 ```
+
+When you enable object resolution with `RESOLVE_OBJECTS=true`, the script will:
+
+1. First try to find the helper scripts in the same directory
+2. If not found, automatically download them from GitHub
+3. Generate detailed reports showing which actual files exist within the Git pack files
+
+This helps you identify specific large files within each repository, rather than just seeing the pack file names.
 
