@@ -7,11 +7,19 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 
 ## Features
 
+### disk_check.sh
 - Displays the server time at run time.
 - Provides filesystem and inode information.
 - Reports the largest directories (to 5 levels deep).
 - Reports the largest files and the largest files older than 30 days.
 - Excludes some directories from scans, ie. (`/proc` and `/data/user/docker/overlay2`).
+
+### repo-filesize-analysis.sh
+- Analyzes Git repositories in `/data/user/repositories` for large files.
+- Reports repositories with files exceeding configurable size thresholds.
+- Generates detailed reports of large files in plain text format.
+- Can automatically resolve Git object hashes to actual filenames.
+- Integrates with GitHub Enterprise Server's `ghe-nwo` command to display proper repository names.
 
 ## Getting Started
 
@@ -61,4 +69,37 @@ https://docs.rackspace.com/docs/troubleshooting-low-disk-space-for-a-linux-cloud
 ## License
 
 This project is licensed under the [GPL-3.0 license](https://github.com/appatalks/gh_disk_space_check/blob/50fff770e07c4b07178ae2939eab82fb45d4f92c/LICENSE).
+
+## Repository Analysis Tools
+
+### repo-filesize-analysis.sh
+
+Analyze Git repositories for large files:
+
+```sh
+# Run with default thresholds (100MB min, 400MB max)
+sudo bash repo-filesize-analysis.sh
+
+# Run with custom thresholds
+SIZE_MIN_MB=25 SIZE_MAX_MB=100 sudo bash repo-filesize-analysis.sh
+
+# Run with automatic object resolution
+SIZE_MIN_MB=25 SIZE_MAX_MB=100 RESOLVE_OBJECTS=true sudo bash repo-filesize-analysis.sh
+```
+
+### resolve-pack-objects.sh
+
+This tool helps you resolve Git pack objects to real filenames:
+
+```sh
+./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git
+```
+
+### process-packs-report.sh
+
+Process the output of repo-filesize-analysis.sh to get detailed information about each pack file:
+
+```sh
+./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt
+```
 

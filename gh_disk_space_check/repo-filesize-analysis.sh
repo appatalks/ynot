@@ -5,6 +5,8 @@
 # Set thresholds in MB
 SIZE_MIN_MB=${SIZE_MIN_MB:-100} # Minimum file size to consider
 SIZE_MAX_MB=${SIZE_MAX_MB:-400} # Maximum file size to consider
+RESOLVE_OBJECTS=${RESOLVE_OBJECTS:-false} # Whether to automatically resolve large Git objects
+TOP_OBJECTS=${TOP_OBJECTS:-10} # Number of top objects to show when resolving
 # Default values can be overridden by environment variable
 
 # Convert MB to bytes for precise comparisons
@@ -207,3 +209,31 @@ echo "Total files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $files_between"
 echo ""
 echo "Detailed report of files over ${SIZE_MAX_MB}MB: $over_max_file"
 echo "Detailed report of files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_file"
+
+# Optionally resolve pack objects if requested
+if [ "$RESOLVE_OBJECTS" = "true" ]; then
+    echo ""
+    echo "Resolving Git pack objects..."
+    
+    # Check if we have the resolver script in the same directory
+    SCRIPT_DIR=$(dirname "$0")
+    RESOLVER_SCRIPT="${SCRIPT_DIR}/process-packs-report.sh"
+    
+    if [ -f "$RESOLVER_SCRIPT" ] && [ -x "$RESOLVER_SCRIPT" ]; then
+        echo "Starting to resolve objects in files over ${SIZE_MAX_MB}MB..."
+        $RESOLVER_SCRIPT -f "$over_max_file" -t "$TOP_OBJECTS"
+        
+        echo "Starting to resolve objects in files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB..."
+        $RESOLVER_SCRIPT -f "$between_file" -t "$TOP_OBJECTS"
+        
+        echo ""
+        echo "Resolved object reports:"
+        echo "Files over ${SIZE_MAX_MB}MB: ${over_max_file}_resolved.txt"
+        echo "Files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: ${between_file}_resolved.txt"
+    else
+        echo "Warning: resolver script not found at $RESOLVER_SCRIPT"
+        echo "To resolve Git objects, please run:"
+        echo "  process-packs-report.sh -f $over_max_file"
+        echo "  process-packs-report.sh -f $between_file"
+    fi
+fi
