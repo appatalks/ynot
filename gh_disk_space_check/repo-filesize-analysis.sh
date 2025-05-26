@@ -230,11 +230,11 @@ if [ "$RESOLVE_OBJECTS" = "true" ]; then
         
         # Download the required scripts
         echo "Downloading process-packs-report.sh..."
-        curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/process-packs-report.sh" -o "${TEMP_DIR}/process-packs-report.sh"
+        curl -s -L "https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/process-packs-report.sh" -o "${TEMP_DIR}/process-packs-report.sh"
         chmod +x "${TEMP_DIR}/process-packs-report.sh"
         
         echo "Downloading resolve-pack-objects.sh..."
-        curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
+        curl -s -L "https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
         chmod +x "${TEMP_DIR}/resolve-pack-objects.sh"
         
         # Update the resolver script path
@@ -256,8 +256,8 @@ if [ "$RESOLVE_OBJECTS" = "true" ]; then
     else
         echo "Warning: Failed to find or download resolver scripts"
         echo "To manually resolve Git objects, run these commands:"
-        echo "  curl -s -L https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/process-packs-report.sh -o ~/process-packs-report.sh"
-        echo "  curl -s -L https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh -o ~/resolve-pack-objects.sh"
+        echo "  curl -s -L https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/process-packs-report.sh -o ~/process-packs-report.sh"
+        echo "  curl -s -L https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/resolve-pack-objects.sh -o ~/resolve-pack-objects.sh"
         echo "  chmod +x ~/process-packs-report.sh ~/resolve-pack-objects.sh"
         echo "  ~/process-packs-report.sh -f $over_max_file"
         echo "  ~/process-packs-report.sh -f $between_file"

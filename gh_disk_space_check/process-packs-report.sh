@@ -61,7 +61,7 @@ if [ ! -f "$RESOLVER_SCRIPT" ] || [ ! -x "$RESOLVER_SCRIPT" ]; then
     trap 'rm -rf "$TEMP_DIR"' EXIT
     
     # Download the required script
-    curl -s -L "https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
+    curl -s -L "https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/resolve-pack-objects.sh" -o "${TEMP_DIR}/resolve-pack-objects.sh"
     chmod +x "${TEMP_DIR}/resolve-pack-objects.sh"
     
     if [ -f "${TEMP_DIR}/resolve-pack-objects.sh" ] && [ -x "${TEMP_DIR}/resolve-pack-objects.sh" ]; then

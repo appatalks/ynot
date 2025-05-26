@@ -28,7 +28,7 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 You can run the script directly from GitHub without cloning the repository. Use the following one-liner:
 
 ```sh
-time bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/disk_check.sh)
+time bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/disk_check.sh)
 ```
 
 ### Optional add to ```cron```
@@ -38,7 +38,7 @@ To run the script every ```15 minutes``` as the "**admin**" user, follow these s
 1. Download the script to `/home/admin`:
 
     ```sh
-    curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/disk_check.sh -o /home/admin/disk_check.sh
+    curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/disk_check.sh -o /home/admin/disk_check.sh
     chmod +x /home/admin/disk_check.sh
     ```
 
@@ -91,10 +91,10 @@ Run directly from GitHub (one-liner):
 
 ```sh
 # Run with default thresholds
-sudo bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/repo-filesize-analysis.sh)
+sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
 
 # Run with custom thresholds and object resolution
-SIZE_MIN_MB=1 SIZE_MAX_MB=25 RESOLVE_OBJECTS=true sudo bash <(curl -sL https://github.com/appatalks/ynot/gh_disk_space_check/raw/main/repo-filesize-analysis.sh)
+SIZE_MIN_MB=1 SIZE_MAX_MB=25 RESOLVE_OBJECTS=true sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
 ```
 
 ### resolve-pack-objects.sh
