@@ -172,6 +172,7 @@ clean_repo_path() {
             break
         fi
     done
+    done
     
     # Special case for hardcoded paths vs variable
     if [[ "$repo_base" != "/data/user/repositories" ]]; then
