@@ -3,8 +3,9 @@
 # Run with: 'sudo bash /tmp/repo-size-analysis.sh'
 
 # Set thresholds in MB
-SIZE_MAX_MB=400  # Looking for files over 400MB
-SIZE_MIN_MB=100   # Looking for files between 100-400MB
+SIZE_MIN_MB=${SIZE_MIN_MB:-100} # Minimum file size to consider
+SIZE_MAX_MB=${SIZE_MAX_MB:-400} # Maximum file size to consider
+# Default values can be overridden by environment variable
 
 # Convert MB to bytes for precise comparisons
 SIZE_MAX_BYTES=$((SIZE_MAX_MB * 1024 * 1024))
