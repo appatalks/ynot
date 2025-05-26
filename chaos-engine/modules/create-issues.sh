@@ -65,7 +65,7 @@ if [[ ${#REPO_NAMES[@]} -eq 0 ]]; then
   curl -k -s -X POST -H "$AUTH" "$API/orgs/${ORG}/repos" \
     -d "{\"name\":\"${TEST_REPO}\",\"auto_init\":true,\"private\":true}" >/dev/null
   REPO_NAMES=("$TEST_REPO")
-  sleep 2
+  sleep 0.5
 fi
 
 # Issue title templates
@@ -259,7 +259,7 @@ for i in $(seq 1 "$NUM_ISSUES"); do
     
     curl -k -s -X POST -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}/issues/${ISSUE_NUM}/comments" \
       -d "{\"body\":${COMMENT_ESCAPED}}" >/dev/null
-    sleep 1
+    sleep 0.5
   done
   
   # If complex issue, add a code sample as a comment

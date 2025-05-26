@@ -230,7 +230,7 @@ for i in $(seq 1 "$NUM_PRS"); do
   if [[ -z "$PR_NUM" || "$PR_NUM" == "null" ]]; then
     echo "     ⚠️ Failed to create PR for branch $BR. Retrying..."
     # Retry once after a short delay
-    sleep 3
+    sleep 2
     PR_NUM=$(curl -k -s -X POST -H "$AUTH" "$API/repos/${ORG}/${REPO}/pulls" \
       -d "{\"title\":\"Edge Case Test PR #${i}\",\"head\":\"${BR}\",\"base\":\"main\"}" \
       | jq -r .number)
@@ -265,12 +265,12 @@ if [[ "${RUN_PR_APPROACHES:-false}" == "true" ]]; then
     git add "real-change.txt"
     git commit -m "feat: real change for PR #${PR_NUM}"
     git push origin "$BR"
-    sleep 2
+    sleep 0.5
     for j in 1 2 3; do
       echo "   • empty commit #$j"
       git commit --allow-empty -m "empty: trigger sync $j for PR #${PR_NUM}"
       git push origin "$BR"
-      sleep 2
+      sleep 0.5
     done
   done
 
@@ -288,13 +288,13 @@ if [[ "${RUN_PR_APPROACHES:-false}" == "true" ]]; then
     git add "force-test.txt"
     git commit -m "feat: force push test for PR #${PR_NUM}"
     git push origin "$BR"
-    sleep 1
+    sleep 0.5
     git commit --amend -m "feat: amended force push test for PR #${PR_NUM}"
     git push --force origin "$BR"
-    sleep 1
+    sleep 0.5
     git commit --amend -m "feat: amended again force push test for PR #${PR_NUM}"
     git push --force origin "$BR"
-    sleep 1
+    sleep 0.5
   done
   sleep 2
 
@@ -313,14 +313,14 @@ if [[ "${RUN_PR_APPROACHES:-false}" == "true" ]]; then
     curl -k -s -X PUT -H "$AUTH" "$API/repos/${ORG}/${REPO}/contents/concurrent-${PR_NUM}.txt" \
       -d "{\"message\":\"concurrent: main update ${PR_NUM}\",\"content\":\"$(echo "Concurrent ${PR_NUM}" | base64)\"}" >/dev/null &
     wait
-    sleep 1
+    sleep 0.5
     CURRENT_SHA=$(git rev-parse HEAD)
     curl -k -s -X PUT -H "$AUTH" "$API/repos/${ORG}/${REPO}/pulls/${PR_NUM}/update-branch" \
       -d "{\"expected_head_sha\":\"${CURRENT_SHA}\"}" >/dev/null &
-    sleep 1
+    sleep 0.5
     git pull origin "$BR" >/dev/null 2>&1
     wait
-    sleep 2
+    sleep 0.5
   done
   sleep 2
 
@@ -339,7 +339,7 @@ if [[ "${RUN_PR_APPROACHES:-false}" == "true" ]]; then
     git add "rebase2.txt"
     git commit -m "rebase: commit 2 for PR #${PR_NUM}"
     git push origin "$BR"
-    sleep 1
+    sleep 0.5
     git reset --hard HEAD~2
     echo "rebased content $(date)" > "rebased.txt"
     git add "rebased.txt"
@@ -360,14 +360,14 @@ if [[ "${RUN_PR_APPROACHES:-false}" == "true" ]]; then
     git add "refs.txt"
     git commit -m "refs: test for PR #${PR_NUM}"
     git push origin "$BR"
-    sleep 1
+    sleep 0.5
     echo "refs test 2 $(date)" > "refs2.txt"
     git add "refs2.txt"
     git commit -m "refs: test 2 for PR #${PR_NUM}"
     NEW_SHA=$(git rev-parse HEAD)
     curl -k -s -X PATCH -H "$AUTH" "$API/repos/${ORG}/${REPO}/git/refs/heads/${BR}" \
       -d "{\"sha\":\"${NEW_SHA}\",\"force\":true}" >/dev/null
-    sleep 2
+    sleep 1
   done
 fi
 
