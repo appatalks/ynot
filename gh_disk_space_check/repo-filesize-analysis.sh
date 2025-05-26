@@ -21,6 +21,8 @@ show_help() {
     echo "  -a, --auto-adjust <y|n> Auto-adjust TOP_OBJECTS based on repository count (default: y)"
     echo "  -p, --parallel <N>     Number of parallel jobs for scanning (default: 4)"
     echo "  -P, --no-parallel      Disable parallel processing"
+    echo "  -T, --timeout <sec>    Timeout in seconds for find commands (default: 60)"
+    echo "  -d, --include-deleted  Include repositories that appear to be deleted but not purged"
     echo ""
     echo "Environment Variables:"
     echo "  SIZE_MIN_MB            Same as --min-size"
@@ -31,6 +33,8 @@ show_help() {
     echo "  AUTO_ADJUST_TOP_OBJECTS Set to 'false' to disable auto-adjustment"
     echo "  PARALLEL_JOBS          Same as --parallel"
     echo "  USE_PARALLEL           Set to 'false' to disable parallel processing"
+    echo "  FIND_TIMEOUT           Same as --timeout"
+    echo "  INCLUDE_DELETED        Set to 'true' to include deleted repositories"
     echo ""
     echo "Example:"
     echo "  sudo bash $0 --min-size 50 --max-size 200 --resolve --top-objects 5"
@@ -81,6 +85,14 @@ while [[ $# -gt 0 ]]; do
             USE_PARALLEL=false
             shift
             ;;
+        -T|--timeout)
+            FIND_TIMEOUT=$2
+            shift 2
+            ;;
+        -d|--include-deleted)
+            INCLUDE_DELETED=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             echo "Use --help for usage information"
@@ -98,6 +110,8 @@ MAX_REPOS=${MAX_REPOS:-50} # Maximum number of repositories to analyze in detail
 AUTO_ADJUST_TOP_OBJECTS=${AUTO_ADJUST_TOP_OBJECTS:-true} # Whether to automatically adjust TOP_OBJECTS based on repository count
 PARALLEL_JOBS=${PARALLEL_JOBS:-4} # Number of parallel jobs for repository scanning
 USE_PARALLEL=${USE_PARALLEL:-true} # Whether to use parallel processing
+FIND_TIMEOUT=${FIND_TIMEOUT:-60} # Timeout in seconds for find commands
+INCLUDE_DELETED=${INCLUDE_DELETED:-false} # Whether to include repositories that appear to be deleted
 # Default values can be overridden by environment variable
 
 # Convert MB to bytes for precise comparisons
@@ -119,17 +133,26 @@ repos_between_ids=""
 declare -a repo_ids_over_max
 declare -a repo_ids_between
 
-echo "Analysis settings:"
+echo "====================================="
+echo "GITHUB REPOSITORY SIZE ANALYZER"
+echo "====================================="
+echo "Analysis started: $(date)"
+echo "This tool scans repositories to identify large files that may be consuming"
+echo "significant disk space. It first performs a quick scan to identify the top"
+echo "repositories by size, then looks for specific large files within them."
+echo ""
+echo "ANALYSIS SETTINGS:"
 echo "- Minimum file size: ${SIZE_MIN_MB}MB"
 echo "- Maximum file size: ${SIZE_MAX_MB}MB"
-echo "- Max repositories to process in detail: $MAX_REPOS"
+echo "- Max repositories to analyze in detail: $MAX_REPOS"
 echo "- Max objects per repository: $TOP_OBJECTS"
+echo "- Include deleted repositories: $INCLUDE_DELETED"
 echo "- Automatic object resolution: $RESOLVE_OBJECTS"
-echo "- Auto-adjust TOP_OBJECTS: $AUTO_ADJUST_TOP_OBJECTS"
 echo "- Parallel processing: $USE_PARALLEL (jobs: $PARALLEL_JOBS)"
+echo "- Find command timeout: ${FIND_TIMEOUT}s"
 echo ""
 echo "Analyzing repositories in /data/user/repositories..."
-echo "Total repository storage: $(sudo du -hsx /data/user/repositories/)"
+echo "Initial estimate: $(sudo du -hsx /data/user/repositories/ 2>/dev/null || echo "Unknown")"
 
 # Check if ghe-nwo is available
 if ! command -v ghe-nwo &> /dev/null; then
@@ -137,11 +160,85 @@ if ! command -v ghe-nwo &> /dev/null; then
     echo "For best results, run this script on a GitHub Enterprise server where ghe-nwo is available."
 fi
 
-# Get list of repositories
+# Identify repositories and check validity
+echo "Scanning for repositories..."
 REPOS=$(sudo find /data/user/repositories -name "*.git" -type d)
-TOTAL_REPOS=$(echo "$REPOS" | wc -l)
+INITIAL_REPOS_COUNT=$(echo "$REPOS" | wc -l)
+echo "Found $INITIAL_REPOS_COUNT Git repositories"
 
-echo "Found $TOTAL_REPOS repositories to analyze"
+# Create a temporary file to store repositories for analysis
+ACTIVE_REPOS_FILE="/tmp/active_repos_$$"
+> "$ACTIVE_REPOS_FILE"
+
+if [ "$INCLUDE_DELETED" = "false" ]; then
+    # Filter out repositories that seem deleted but not purged
+    echo "Filtering out deleted/empty repositories..."
+    for REPO in $REPOS; do
+        # Check if repository has objects directory with pack files - simple heuristic for active repos
+        if sudo test -d "$REPO/objects" && sudo find "$REPO" -type f -name "*.pack" | grep -q .; then
+            echo "$REPO" >> "$ACTIVE_REPOS_FILE"
+        fi
+    done
+    
+    # Read filtered repositories
+    REPOS=$(cat "$ACTIVE_REPOS_FILE")
+    TOTAL_REPOS=$(echo "$REPOS" | wc -l)
+    echo "Found $TOTAL_REPOS active repositories after filtering"
+    echo "Excluded $(($INITIAL_REPOS_COUNT - $TOTAL_REPOS)) repositories that appear to be deleted/empty"
+else
+    # No filtering, use all repositories
+    echo "$REPOS" > "$ACTIVE_REPOS_FILE"
+    TOTAL_REPOS=$INITIAL_REPOS_COUNT
+    echo "Including all repositories, including potentially deleted ones"
+fi
+
+# Now do a quick size scan to identify the largest repositories
+echo "Performing initial size scan to identify largest repositories..."
+ALL_REPOS_SIZES_FILE="/tmp/all_repos_sizes_$$"
+TOP_REPOS_FILE="/tmp/top_repos_$$"
+
+# Get size of all repositories with faster parallelized approach
+if [ "$USE_PARALLEL_FINAL" = true ] && command -v parallel &>/dev/null; then
+    echo "$REPOS" | parallel --will-cite -j "$PARALLEL_JOBS" "sudo du -s {} 2>/dev/null" > "$ALL_REPOS_SIZES_FILE"
+else
+    sudo du -s $REPOS 2>/dev/null > "$ALL_REPOS_SIZES_FILE"
+fi
+
+# Calculate total size of all repos for context
+TOTAL_SIZE_KB=$(awk '{sum+=$1} END {print sum}' "$ALL_REPOS_SIZES_FILE")
+TOTAL_SIZE_MB=$((TOTAL_SIZE_KB / 1024))
+TOTAL_SIZE_GB=$(echo "scale=2; $TOTAL_SIZE_MB/1024" | bc)
+
+# Find a sensible threshold - either top N repos or repos above certain size
+if [ $TOTAL_REPOS -gt $((MAX_REPOS * 10)) ]; then
+    # With many repos, focus on largest ones
+    sort -rn "$ALL_REPOS_SIZES_FILE" | head -n $MAX_REPOS > "$TOP_REPOS_FILE"
+    SELECTION_METHOD="Top $MAX_REPOS repositories by size"
+else
+    # With fewer repos, include all larger than 1% of total size
+    SIZE_THRESHOLD=$((TOTAL_SIZE_KB / 100))
+    if [ $SIZE_THRESHOLD -lt 1024 ]; then  # At least 1MB
+        SIZE_THRESHOLD=1024
+    fi
+    sort -rn "$ALL_REPOS_SIZES_FILE" | awk -v threshold="$SIZE_THRESHOLD" '$1 >= threshold' > "$TOP_REPOS_FILE"
+    REPOS_ABOVE_THRESHOLD=$(wc -l < "$TOP_REPOS_FILE")
+    
+    # If we got too many repos, cap it at MAX_REPOS
+    if [ $REPOS_ABOVE_THRESHOLD -gt $MAX_REPOS ]; then
+        sort -rn "$ALL_REPOS_SIZES_FILE" | head -n $MAX_REPOS > "$TOP_REPOS_FILE"
+        SELECTION_METHOD="Top $MAX_REPOS repositories by size"
+    else 
+        SELECTION_METHOD="$REPOS_ABOVE_THRESHOLD repositories larger than $SIZE_THRESHOLD KB"
+    fi
+fi
+
+TOP_REPOS_COUNT=$(wc -l < "$TOP_REPOS_FILE")
+TOP_REPOS_SIZE_KB=$(awk '{sum+=$1} END {print sum}' "$TOP_REPOS_FILE")
+TOP_REPOS_SIZE_PERCENT=$(echo "scale=1; 100 * $TOP_REPOS_SIZE_KB / $TOTAL_SIZE_KB" | bc)
+
+echo "Total repository storage: $TOTAL_SIZE_GB GB across $TOTAL_REPOS repositories"
+echo "Selected $SELECTION_METHOD for detailed analysis"
+echo "These repositories account for $TOP_REPOS_SIZE_PERCENT% of total storage"
 
 # Create temporary files to store results
 over_max_file="/tmp/repos_over_${SIZE_MAX_MB}mb.txt"
@@ -191,9 +288,46 @@ process_repo() {
     local has_file_over_max=0
     local has_file_between=0
     
-    # Look for loose objects first (simpler for very small repos)
-    # Run a simple find command to identify large files by size
-    local large_files=$(sudo find $REPO -type f -size +${SIZE_MIN_MB}M 2>/dev/null)
+    # First check pack files which are likely to be large
+    local pack_dir="$REPO/objects/pack"
+    if sudo test -d "$pack_dir"; then
+        # Get list of large pack files first - they're most likely to contain large objects
+        # Use timeout to prevent hanging on problematic repositories
+        local large_packs=$(timeout $FIND_TIMEOUT sudo find "$pack_dir" -name "*.pack" -size +${SIZE_MIN_MB}M 2>/dev/null)
+        
+        if [ -n "$large_packs" ]; then
+            # Process each pack file
+            while IFS= read -r pack_file; do
+                # Get file size
+                local file_size=$(sudo stat -c '%s' "$pack_file" 2>/dev/null)
+                if [ -z "$file_size" ]; then
+                    continue
+                fi
+                
+                # Friendly display of file size
+                if [ "$file_size" -ge 1073741824 ]; then
+                    local size_display="$(echo "scale=2; $file_size/1073741824" | bc)GB"
+                elif [ "$file_size" -ge 1048576 ]; then
+                    local size_display="$(echo "scale=2; $file_size/1048576" | bc)MB"
+                else
+                    local size_display="$(echo "scale=2; $file_size/1024" | bc)KB"
+                fi
+                
+                # Categorize based on file size
+                if [ "$file_size" -gt "$SIZE_MAX_BYTES" ]; then
+                    flock ${over_max_file}.lock -c "echo \"$REPO:$pack_file ($size_display)\" >> ${over_max_file}.tmp"
+                    has_file_over_max=1
+                elif [ "$file_size" -gt "$SIZE_MIN_BYTES" ]; then
+                    flock ${between_file}.lock -c "echo \"$REPO:$pack_file ($size_display)\" >> ${between_file}.tmp"
+                    has_file_between=1
+                fi
+            done <<< "$large_packs"
+        fi
+    fi
+    
+    # Now look for other large files (more expensive operation, but needed for completeness)
+    # Skip objects/pack since we already processed those, and use timeout to avoid hanging
+    local large_files=$(timeout $FIND_TIMEOUT sudo find $REPO -path "$REPO/objects/pack" -prune -o -type f -size +${SIZE_MIN_MB}M -print 2>/dev/null)
     
     if [ -n "$large_files" ]; then
         # Process each large file and categorize it
@@ -252,9 +386,12 @@ touch ${over_max_file}.lock ${between_file}.lock
 touch /tmp/repo_ids_over_max.lock /tmp/repo_ids_between.lock
 touch /tmp/repo_ids_over_max.list /tmp/repo_ids_between.list
 
+# Extract just the repository paths from the top repos file
+REPOS_TO_PROCESS=$(awk '{print $2}' "$TOP_REPOS_FILE")
+
 # Process repositories in parallel or sequentially
 if [ "$USE_PARALLEL_FINAL" = true ]; then
-    echo "Using parallel processing with $PARALLEL_JOBS jobs..."
+    echo "Using parallel processing with $PARALLEL_JOBS jobs on top $TOP_REPOS_COUNT repositories..."
     
     # For one-liner scripts, we need a different approach since functions aren't exported to parallel
     # Create a temporary script that's completely standalone with all variables needed
@@ -268,6 +405,7 @@ SIZE_MIN_BYTES=${SIZE_MIN_BYTES}
 SIZE_MAX_BYTES=${SIZE_MAX_BYTES}
 over_max_file="${over_max_file}"
 between_file="${between_file}"
+FIND_TIMEOUT=${FIND_TIMEOUT}
 
 # Standalone version of process_repo function
 process_one_repo() {
@@ -291,8 +429,41 @@ process_one_repo() {
     local has_file_over_max=0
     local has_file_between=0
     
-    # Look for large files
-    local large_files=\$(sudo find \$REPO -type f -size +\${SIZE_MIN_MB}M 2>/dev/null)
+    # First check pack files which are likely to be large
+    local pack_dir="\$REPO/objects/pack"
+    if sudo test -d "\$pack_dir"; then
+        # Get list of large pack files first, with timeout
+        local large_packs=\$(timeout \${FIND_TIMEOUT:-60} sudo find "\$pack_dir" -name "*.pack" -size +\${SIZE_MIN_MB}M 2>/dev/null)
+        
+        if [ -n "\$large_packs" ]; then
+            while IFS= read -r pack_file; do
+                local file_size=\$(sudo stat -c '%s' "\$pack_file" 2>/dev/null)
+                if [ -z "\$file_size" ]; then
+                    continue
+                fi
+                
+                if [ "\$file_size" -ge 1073741824 ]; then
+                    local size_display="\$(echo "scale=2; \$file_size/1073741824" | bc)GB"
+                elif [ "\$file_size" -ge 1048576 ]; then
+                    local size_display="\$(echo "scale=2; \$file_size/1048576" | bc)MB"
+                else
+                    local size_display="\$(echo "scale=2; \$file_size/1024" | bc)KB"
+                fi
+                
+                if [ "\$file_size" -gt "\$SIZE_MAX_BYTES" ]; then
+                    flock \${over_max_file}.lock -c "echo \"\$REPO:\$pack_file (\$size_display)\" >> \${over_max_file}.tmp"
+                    has_file_over_max=1
+                elif [ "\$file_size" -gt "\$SIZE_MIN_BYTES" ]; then
+                    flock \${between_file}.lock -c "echo \"\$REPO:\$pack_file (\$size_display)\" >> \${between_file}.tmp"
+                    has_file_between=1
+                fi
+            done <<< "\$large_packs"
+        fi
+    fi
+    
+    # Now look for other large files (skip objects/pack since we already processed those)
+    # Use timeout to avoid hanging on problematic repositories
+    local large_files=\$(timeout \${FIND_TIMEOUT:-60} sudo find \$REPO -path "\$REPO/objects/pack" -prune -o -type f -size +\${SIZE_MIN_MB}M -print 2>/dev/null)
     
     if [ -n "\$large_files" ]; then
         while IFS= read -r file; do
@@ -338,17 +509,22 @@ EOL
     chmod +x /tmp/repo_processor.$$.sh
     
     # Use parallel with the temp script instead of the function directly
-    echo "$REPOS" | parallel --will-cite -j "$PARALLEL_JOBS" \
-        "/bin/bash /tmp/repo_processor.$$.sh {} {#} $TOTAL_REPOS"
+    echo "$REPOS_TO_PROCESS" | parallel --will-cite -j "$PARALLEL_JOBS" \
+        "/bin/bash /tmp/repo_processor.$$.sh {} {#} $TOP_REPOS_COUNT"
     
     # Clean up
     rm -f /tmp/repo_processor.$$.sh
 else
     # Process sequentially
     repo_count=0
-    for REPO in $REPOS; do
+    for REPO in $REPOS_TO_PROCESS; do
         repo_count=$((repo_count + 1))
-        process_repo "$REPO" "$repo_count" "$TOTAL_REPOS"
+        process_repo "$REPO" "$repo_count" "$TOP_REPOS_COUNT"
+        
+        # Show progress every 10 repositories
+        if [ $((repo_count % 10)) -eq 0 ]; then
+            echo "Progress: $repo_count/$TOP_REPOS_COUNT repositories processed"
+        fi
     done
 fi
 
@@ -360,6 +536,8 @@ readarray -t repo_ids_between < /tmp/repo_ids_between.list
 rm -f ${over_max_file}.lock ${between_file}.lock
 rm -f /tmp/repo_ids_over_max.lock /tmp/repo_ids_between.lock
 rm -f /tmp/repo_ids_over_max.list /tmp/repo_ids_between.list
+rm -f "$ACTIVE_REPOS_FILE" "$TOP_REPOS_FILE" "$ALL_REPOS_SIZES_FILE"
+rm -f /tmp/repo_processor.$$.sh 2>/dev/null
 
 # Post-processing: Convert repository IDs to names using ghe-nwo
 echo "Converting repository IDs to human-readable names..."
@@ -412,28 +590,42 @@ sudo mv ${between_file}.tmp ${between_file}
 echo "======================================"
 echo "REPOSITORY FILE SIZE ANALYSIS SUMMARY"
 echo "======================================"
-echo "Total repositories analyzed: $TOTAL_REPOS"
+echo "Total repositories found: $TOTAL_REPOS"
+echo "Analyzed top $TOP_REPOS_COUNT repositories by size"
 echo ""
-echo "1. How many repos have single files in excess of ${SIZE_MAX_MB}MB?"
-echo "   Answer: $repos_with_files_over_max repositories"
-if [ $repos_with_files_over_max -gt 0 ]; then
-    echo "   Repositories: $(echo $repos_over_max | tr ' ' ',')"
+
+# Count unique repositories in the results
+over_max_repos=$(awk -F: '{print $1}' "$over_max_file" 2>/dev/null | sort -u | wc -l)
+between_repos=$(awk -F: '{print $1}' "$between_file" 2>/dev/null | sort -u | wc -l)
+over_max_files=$(wc -l < "$over_max_file" 2>/dev/null || echo 0)
+between_files=$(wc -l < "$between_file" 2>/dev/null || echo 0)
+
+echo "FINDINGS SUMMARY:"
+echo "----------------"
+echo "1. Repositories with files > ${SIZE_MAX_MB}MB: $over_max_repos"
+echo "   Total files > ${SIZE_MAX_MB}MB: $over_max_files"
+echo ""
+echo "2. Repositories with files ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_repos" 
+echo "   Total files ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_files"
+echo ""
+
+# Show top 5 largest repositories with large files
+if [ $over_max_repos -gt 0 ]; then
+    echo "TOP 5 REPOSITORIES WITH LARGEST FILES:"
+    echo "------------------------------------"
+    awk -F: '{print $1}' "$over_max_file" | sort | uniq -c | sort -nr | head -5 | 
+    while read count repo; do
+        echo "  $repo: $count large files"
+    done
+    echo ""
 fi
+
+echo "REPORTS LOCATION:"
+echo "---------------"
+echo "* Files over ${SIZE_MAX_MB}MB: $over_max_file"
+echo "* Files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_file"
 echo ""
-echo "2. How many repos have files between ${SIZE_MIN_MB}MB to ${SIZE_MAX_MB}MB?"
-echo "   Answer: $repos_with_files_between repositories"
-if [ $repos_with_files_between -gt 0 ]; then
-    echo "   Repositories: $(echo $repos_between | tr ' ' ',')"
-fi
-echo ""
-echo "3. How many repos have files larger than ${SIZE_MIN_MB}MB?"
-echo "   Answer: $repos_with_files_over_min repositories"
-echo ""
-echo "Total files over ${SIZE_MAX_MB}MB: $files_over_max"
-echo "Total files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $files_between"
-echo ""
-echo "Detailed report of files over ${SIZE_MAX_MB}MB: $over_max_file"
-echo "Detailed report of files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_file"
+echo "Analysis completed: $(date)"
 
 # Optionally resolve pack objects if requested
 if [ "$RESOLVE_OBJECTS" = "true" ]; then
