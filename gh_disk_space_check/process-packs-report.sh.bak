@@ -1,9 +1,5 @@
 #!/bin/bash
 # Script to process repo-filesize-analysis.sh output files and resolve Git pack objects
-# 
-# May 2025 update: Fixed path duplication issue that caused errors like:
-# "Repository not found: /data/user/repositories//data/user/repositories/path/to/repo"
-# Added clean_repo_path function to normalize paths and detect/fix path duplications
 
 # Default values
 INPUT_FILE=""
@@ -151,13 +147,12 @@ priority_repos=$(
 clean_repo_path() {
     local path="$1"
     local repo_base="${REPOSITORY_BASE:-/data/user/repositories}"
-    local original_path="$path"
     
     # First, normalize the path by removing trailing slashes
     path="${path%/}"
     
     # Remove any duplicate repository base paths (handles multiple occurrences)
-    while [[ "$path" == *"$repo_base"*"$repo_base"* ]]; then
+    while [[ "$path" == *"$repo_base"*"$repo_base"* ]]; do
         # Get the substring starting with the pattern
         local duplicate_part="${path#*$repo_base}"
         # If the substring starts with the pattern again, remove it
@@ -179,16 +174,11 @@ clean_repo_path() {
     # Handle any double slash scenarios that might occur during replacements
     while [[ "$path" == *"//"* ]]; do
         path="${path//\/\//\/}"
-    fi
+    done
     
     # Ensure .git suffix isn't duplicated
     if [[ "$path" == *".git.git" ]]; then
         path="${path%.git.git}.git"
-    fi
-    
-    # Debug log if we fixed something
-    if [[ "$path" != "$original_path" ]] && [[ "$VERBOSE" -eq 1 ]]; then
-        echo "Path fixed: $original_path -> $path" >&2
     fi
     
     echo "$path"

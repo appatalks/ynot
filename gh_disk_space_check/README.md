@@ -117,6 +117,9 @@ Process the output of repo-filesize-analysis.sh to get detailed information abou
 
 ```sh
 ./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt
+
+# Enable verbose mode to show path corrections
+./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt -v
 ```
 
 When you enable object resolution with `RESOLVE_OBJECTS=true`, the script will:
@@ -145,6 +148,10 @@ This helps you identify specific large files within each repository, rather than
    - Show basic information about object size
    - Mark objects as [unresolved], [detached], or [unknown] depending on what was found
    - Show instructions for further investigation
+
+5. **Path Correction**: The scripts automatically fix duplicated repository base paths
+   - Resolves issues with paths like `/data/user/repositories//data/user/repositories/`
+   - Use the `-v` flag with `process-packs-report.sh` to see path corrections in real-time
 
 ## Performance Optimizations for Large Installations
 
