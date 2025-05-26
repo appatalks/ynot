@@ -209,6 +209,9 @@ TOTAL_SIZE_KB=$(awk '{sum+=$1} END {print sum}' "$ALL_REPOS_SIZES_FILE")
 TOTAL_SIZE_MB=$((TOTAL_SIZE_KB / 1024))
 TOTAL_SIZE_GB=$(echo "scale=2; $TOTAL_SIZE_MB/1024" | bc)
 
+# Initialize USE_PARALLEL_FINAL variable early to avoid potential issues
+USE_PARALLEL_FINAL=$USE_PARALLEL
+
 # Find a sensible threshold - either top N repos or repos above certain size
 if [ $TOTAL_REPOS -gt $((MAX_REPOS * 10)) ]; then
     # With many repos, focus on largest ones
@@ -280,6 +283,11 @@ process_repo() {
         local nwo=$(sudo ghe-nwo "$REPO" 2>/dev/null)
         if [ -n "$nwo" ]; then
             display_repo_name="$nwo"
+            # Also store in a temp lookup file for later use
+            echo "$REPO:$nwo" >> /tmp/repo_nwo_lookup.$$
+        else
+            # No NWO available, use a cleaned up path
+            echo "$REPO:$REPO_NAME" >> /tmp/repo_nwo_lookup.$$
         fi
     fi
     
@@ -532,12 +540,34 @@ fi
 readarray -t repo_ids_over_max < /tmp/repo_ids_over_max.list
 readarray -t repo_ids_between < /tmp/repo_ids_between.list
 
+# Create a lookup table for repository names if it doesn't already exist
+if [ ! -f /tmp/repo_nwo_lookup.$$ ] && command -v ghe-nwo &> /dev/null; then
+    # Ensure the file exists even if process_repo didn't create it (parallel mode)
+    touch /tmp/repo_nwo_lookup.$$
+    
+    # Get names for any repositories we haven't already looked up
+    for repo_path in "${repo_ids_over_max[@]}" "${repo_ids_between[@]}"; do
+        if ! grep -q "^$repo_path:" /tmp/repo_nwo_lookup.$$ 2>/dev/null; then
+            repo_name=$(echo "$repo_path" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            nwo=$(sudo ghe-nwo "$repo_path" 2>/dev/null)
+            if [ -n "$nwo" ]; then
+                echo "$repo_path:$nwo" >> /tmp/repo_nwo_lookup.$$
+            else
+                echo "$repo_path:$repo_name" >> /tmp/repo_nwo_lookup.$$
+            fi
+        fi
+    done
+fi
+
 # Clean up temporary files
 rm -f ${over_max_file}.lock ${between_file}.lock
 rm -f /tmp/repo_ids_over_max.lock /tmp/repo_ids_between.lock
 rm -f /tmp/repo_ids_over_max.list /tmp/repo_ids_between.list
 rm -f "$ACTIVE_REPOS_FILE" "$TOP_REPOS_FILE" "$ALL_REPOS_SIZES_FILE"
 rm -f /tmp/repo_processor.$$.sh 2>/dev/null
+
+# Keep the repository lookup file for the final pass of fixing repository names
+# It will be cleaned up at the end
 
 # Post-processing: Convert repository IDs to names using ghe-nwo
 echo "Converting repository IDs to human-readable names..."
@@ -553,8 +583,10 @@ if command -v ghe-nwo &> /dev/null; then
             nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
             if [ -n "$nwo" ]; then
                 repos_over_max="$repos_over_max $nwo"
-                # Replace repo ID with NWO in temp file
-                sudo sed -i "s|^$repo_name:|$nwo:|g" ${over_max_file}.tmp
+                # Replace repo ID with NWO in temp file - use a more specific pattern to avoid partial matches
+                sudo sed -i "s|^$repo:|$nwo:|g" ${over_max_file}.tmp
+                # Make a second pass to catch any instances where the path might be double-quoted
+                sudo sed -i "s|\"$repo:|\"$nwo:|g" ${over_max_file}.tmp
             else
                 repos_over_max="$repos_over_max $repo_name"
             fi
@@ -569,8 +601,10 @@ if command -v ghe-nwo &> /dev/null; then
             nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
             if [ -n "$nwo" ]; then
                 repos_between="$repos_between $nwo"
-                # Replace repo ID with NWO in temp file
-                sudo sed -i "s|^$repo_name:|$nwo:|g" ${between_file}.tmp
+                # Replace repo ID with NWO in temp file - use a more specific pattern to avoid partial matches
+                sudo sed -i "s|^$repo:|$nwo:|g" ${between_file}.tmp
+                # Make a second pass to catch any instances where the path might be double-quoted
+                sudo sed -i "s|\"$repo:|\"$nwo:|g" ${between_file}.tmp
             else
                 repos_between="$repos_between $repo_name"
             fi
@@ -585,6 +619,43 @@ fi
 # Move temporary files to final files
 sudo mv ${over_max_file}.tmp ${over_max_file}
 sudo mv ${between_file}.tmp ${between_file}
+
+# Fix any problematic paths in the output files
+if command -v ghe-nwo &> /dev/null; then
+    echo "Fixing repository paths in output files..."
+    # Process each file line by line and ensure repository paths are properly named
+    for output_file in "$over_max_file" "$between_file"; do
+        if [ -f "$output_file" ]; then
+            tmp_fixed_file="${output_file}.fixed"
+            > "$tmp_fixed_file"
+            
+            while IFS= read -r line; do
+                # Extract repository path - handle the colon carefully
+                repo_path=$(echo "$line" | awk -F: '{print $1}')
+                file_info=$(echo "$line" | cut -d':' -f2-)
+                
+                # If it's a full path that looks like a repository path
+                if [[ "$repo_path" == "/data/user/repositories/"* ]]; then
+                    # Try to get the friendly name via ghe-nwo
+                    nwo=$(sudo ghe-nwo "$repo_path" 2>/dev/null)
+                    if [ -n "$nwo" ]; then
+                        # Replace with friendly name, but do it safely without sed which can have issues with paths
+                        echo "${nwo}:${file_info}" >> "$tmp_fixed_file"
+                    else
+                        # Keep as is if no friendly name available
+                        echo "$line" >> "$tmp_fixed_file"
+                    fi
+                else
+                    # If not a path, keep as is
+                    echo "$line" >> "$tmp_fixed_file"
+                fi
+            done < "$output_file"
+            
+            # Replace with fixed file
+            sudo mv "$tmp_fixed_file" "$output_file"
+        fi
+    done
+fi
 
 # Print summary report
 echo "======================================"
@@ -626,6 +697,35 @@ echo "* Files over ${SIZE_MAX_MB}MB: $over_max_file"
 echo "* Files between ${SIZE_MIN_MB}MB-${SIZE_MAX_MB}MB: $between_file"
 echo ""
 echo "Analysis completed: $(date)"
+
+# Final pass to ensure repository names are properly displayed
+if [ -f /tmp/repo_nwo_lookup.$$ ]; then
+    echo ""
+    echo "Making final pass to ensure repository names are properly displayed..."
+    
+    # Read in the lookup table
+    while IFS=: read -r repo_path repo_name; do
+        if [ -n "$repo_path" ] && [ -n "$repo_name" ]; then
+            # Replace full paths with friendly names in both output files
+            for output_file in "$over_max_file" "$between_file"; do
+                if [ -f "$output_file" ]; then
+                    # First escape any special characters in the path for sed
+                    escaped_path=$(echo "$repo_path" | sed 's/[\/&]/\\&/g')
+                    
+                    # Replace at beginning of line (repo path)
+                    sudo sed -i "s/^${escaped_path}:/${repo_name}:/g" "$output_file"
+                    
+                    # Replace in the middle of a line (file paths)
+                    sudo sed -i "s/ ${escaped_path}:/ ${repo_name}:/g" "$output_file"
+                    sudo sed -i "s/ ${escaped_path}\// ${repo_name}\//g" "$output_file"
+                fi
+            done
+        fi
+    done < /tmp/repo_nwo_lookup.$$
+    
+    # Clean up the lookup table
+    rm -f /tmp/repo_nwo_lookup.$$
+fi
 
 # Optionally resolve pack objects if requested
 if [ "$RESOLVE_OBJECTS" = "true" ]; then

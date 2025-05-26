@@ -81,10 +81,21 @@ if [ ! -f "$RESOLVER_SCRIPT" ] || [ ! -x "$RESOLVER_SCRIPT" ]; then
 fi
 
 # Output file
-# Check if the input file has a .txt extension
-if [[ "$INPUT_FILE" == *.txt ]]; then
+# Check if the input file name already contains _resolved.txt
+if [[ "$INPUT_FILE" == *"_resolved.txt" ]]; then
+    # If it does, remove any .txt suffix and append _final.txt
+    OUTPUT_FILE="${INPUT_FILE%_resolved.txt}_final.txt"
+    if [[ "$OUTPUT_FILE" == *".txt"* ]]; then
+        OUTPUT_FILE="${OUTPUT_FILE%.txt}_final.txt"
+    else
+        OUTPUT_FILE="${OUTPUT_FILE}_final.txt"
+    fi
+# Check if it has a .txt extension
+elif [[ "$INPUT_FILE" == *.txt ]]; then
+    # Regular case, remove .txt and add _resolved.txt
     OUTPUT_FILE="${INPUT_FILE%.txt}_resolved.txt"
 else
+    # No .txt extension, just add _resolved.txt
     OUTPUT_FILE="${INPUT_FILE}_resolved.txt"
 fi
 > "$OUTPUT_FILE"
@@ -206,9 +217,34 @@ cat "$INPUT_FILE" | while read -r line; do
     repo_name=$(echo "$line" | cut -d':' -f1 | xargs)
     file_info=$(echo "$line" | cut -d':' -f2- | xargs)
     
+    # Handle case where repository path is duplicated in the file information
+    if [[ "$file_info" == "$repo_name/"* ]] || [[ "$file_info" == "$repo_name:"* ]]; then
+        # Fix duplicated repository path in file_info
+        file_info=$(echo "$file_info" | sed "s|^$repo_name[/:]||")
+    fi
+    
+    # Special case handling for repository paths that contain full path twice
+    if [[ "$file_info" == *"/data/user/repositories/"* ]]; then
+        # Clean up duplicated path segments
+        file_info=$(echo "$file_info" | sed 's|/data/user/repositories/||g')
+        if [[ ! "$file_info" == objects/pack/* ]]; then
+            # Ensure correct format if not already prefixed
+            file_info="objects/pack/$file_info"
+        fi
+    fi
+    
+    # Handle malformed file info that doesn't include objects/pack prefix
+    if [[ "$file_info" == pack-*.pack* && ! "$file_info" == objects/pack/* ]]; then
+        file_info="objects/pack/$file_info"
+    fi
+    
     # Extract the pack file name and size
-    if [[ "$file_info" =~ (objects/pack/pack-[^[:space:]]+) ]]; then
+    if [[ "$file_info" =~ (objects/pack/pack-[^[:space:]]+\.pack) ]]; then
         pack_file=${BASH_REMATCH[1]}
+    # Try an alternative pattern for pack files that may be missing the .pack extension
+    elif [[ "$file_info" =~ (objects/pack/pack-[0-9a-f]+) ]]; then
+        pack_file="${BASH_REMATCH[1]}.pack"
+        echo "Added .pack extension to: $pack_file" >&2
         
         # Extract the size portion, which should be in parentheses at the end
         if [[ "$file_info" =~ \(([0-9]+[[:space:]]*[A-Za-z]+)\) ]]; then
@@ -350,6 +386,7 @@ cat "$INPUT_FILE" | while read -r line; do
             # Store the original path for comparison
             original_path="$repo_path"
             attempted_path="$repo_path"
+            found_path=false
             
             # If there's path duplication, highlight this as a potential issue
             if [[ "$original_path" != "$(clean_repo_path "$original_path")" ]]; then
@@ -364,10 +401,12 @@ cat "$INPUT_FILE" | while read -r line; do
                 if sudo test -d "$corrected_path"; then
                     echo "  NOTE: The corrected path exists in the filesystem" >> "$OUTPUT_FILE"
                     attempted_path="$corrected_path"
+                    found_path=true
                 # Check with .git suffix
                 elif sudo test -d "${corrected_path}.git"; then
                     echo "  NOTE: The corrected path with .git suffix exists in the filesystem" >> "$OUTPUT_FILE" 
                     attempted_path="${corrected_path}.git"
+                    found_path=true
                 # Try removing any remaining duplicate segments
                 elif [[ "$corrected_path" == *"/data/user/repositories"*"/data/user/repositories"* ]]; then
                     stripped_path="${corrected_path//\/data\/user\/repositories\//\/}"
@@ -376,13 +415,33 @@ cat "$INPUT_FILE" | while read -r line; do
                     if sudo test -d "$stripped_path"; then
                         echo "  Success! Stripped path exists" >> "$OUTPUT_FILE"
                         attempted_path="$stripped_path"
+                        found_path=true
                     fi
                 fi
                 
-                # If we found a working path, offer helpful information
-                if sudo test -d "$attempted_path" && [[ "$attempted_path" != "$original_path" ]]; then
+                # If we found a working path, offer helpful information and try to process it
+                if [ "$found_path" = true ] && [[ "$attempted_path" != "$original_path" ]]; then
                     echo "  RESOLUTION: The correct working path appears to be: $attempted_path" >> "$OUTPUT_FILE"
                     echo "  Please check your input file format to prevent path duplication issues" >> "$OUTPUT_FILE"
+                    
+                    # Try to process the pack file at the corrected location 
+                    corrected_pack_path="$attempted_path/$pack_file"
+                    if sudo test -f "$corrected_pack_path"; then
+                        echo "" >> "$OUTPUT_FILE"
+                        echo "Attempting to process with the corrected path:" >> "$OUTPUT_FILE"
+                        
+                        # Run the resolver with the corrected path
+                        adjusted_top_objects=$TOP_OBJECTS
+                        if [ "$repo_size_mb" -gt 500 ]; then
+                            adjusted_top_objects=5
+                        fi
+                        
+                        echo "Using TOP_OBJECTS=$adjusted_top_objects for this repository" >> "$OUTPUT_FILE"
+                        sudo "$RESOLVER_SCRIPT" -p "$corrected_pack_path" -r "$attempted_path" -m "$MIN_SIZE_MB" -t "$adjusted_top_objects" -T 60 >> "$OUTPUT_FILE" 2>&1
+                    else
+                        echo "  The pack file was not found at the corrected location: $corrected_pack_path" >> "$OUTPUT_FILE"
+                    fi
+                }
                 fi
             fi
             
@@ -405,7 +464,7 @@ cat "$INPUT_FILE" | while read -r line; do
         echo "Original line: $line" >> "$OUTPUT_FILE"
         echo "" >> "$OUTPUT_FILE"
         
-        # Try to extract any .pack or .idx reference
+        # Try to extract any .pack or .idx reference or any Git SHA reference
         if [[ "$line" =~ (pack-[[:alnum:]]+\.(pack|idx)) ]]; then
             potential_pack="${BASH_REMATCH[1]}"
             echo "Potential pack file reference found: $potential_pack" >> "$OUTPUT_FILE"
@@ -416,9 +475,27 @@ cat "$INPUT_FILE" | while read -r line; do
             if [ -n "$search_result" ]; then
                 echo "Found in:" >> "$OUTPUT_FILE"
                 echo "$search_result" >> "$OUTPUT_FILE"
+                
+                # Try to process this pack file directly
+                for found_pack in $search_result; do
+                    echo "Attempting to process found pack: $found_pack" >> "$OUTPUT_FILE"
+                    # Extract repository path from the found pack path
+                    repo_path=$(echo "$found_pack" | sed -E 's|(.*)/objects/pack/.*|\1|')
+                    if [ -d "$repo_path" ]; then
+                        echo "Using repository: $repo_path" >> "$OUTPUT_FILE"
+                        sudo "$RESOLVER_SCRIPT" -p "$found_pack" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$TOP_OBJECTS" -T 30 >> "$OUTPUT_FILE" 2>&1
+                    fi
+                    break # Just process the first one we find
+                done
             else
                 echo "Not found in repository storage." >> "$OUTPUT_FILE"
             fi
+        # Try to find Git SHA references that might be pack objects
+        elif [[ "$line" =~ ([0-9a-f]{40}) ]]; then
+            potential_sha="${BASH_REMATCH[1]}"
+            echo "Potential Git SHA reference found: $potential_sha" >> "$OUTPUT_FILE"
+            echo "This might be a Git object. If you know which repository it belongs to," >> "$OUTPUT_FILE"
+            echo "you can run: git -C /path/to/repo log --all --find-object=$potential_sha" >> "$OUTPUT_FILE"
         fi
         
         echo "" >> "$OUTPUT_FILE"
@@ -427,4 +504,40 @@ cat "$INPUT_FILE" | while read -r line; do
     fi
 done
 
-echo "Processing complete. Results saved to $OUTPUT_FILE"
+# Verify the output file has content and provide helpful feedback
+OUTPUT_SIZE=$(wc -l < "$OUTPUT_FILE" 2>/dev/null || echo "0")
+
+if [ "$OUTPUT_SIZE" -gt 10 ]; then
+    echo "Processing complete. Results saved to $OUTPUT_FILE ($OUTPUT_SIZE lines)"
+    
+    # Count how many repositories were successfully processed vs. failed
+    SUCCESSFUL_REPOS=$(grep -c "Running resolver with sudo..." "$OUTPUT_FILE")
+    NOT_FOUND_REPOS=$(grep -c "ERROR: Repository not found:" "$OUTPUT_FILE")
+    NOT_FOUND_PACKS=$(grep -c "ERROR: Pack file not found" "$OUTPUT_FILE")
+    
+    echo "Summary:"
+    echo "- Successfully processed pack files: $SUCCESSFUL_REPOS"
+    echo "- Repositories not found: $NOT_FOUND_REPOS"
+    echo "- Pack files not found: $NOT_FOUND_PACKS"
+    
+    if [ "$SUCCESSFUL_REPOS" -eq 0 ] && [ "$NOT_FOUND_REPOS" -gt 0 ]; then
+        echo "WARNING: No repositories were successfully processed."
+        echo "         This may be due to path issues or deleted repositories."
+        echo "         Check the output file for details and try running again with -v for verbose output."
+    fi
+else
+    echo "WARNING: Output file contains very little data ($OUTPUT_SIZE lines)."
+    echo "         There might be an issue with the input file format or repository paths."
+    echo "         Try running with -v for verbose output to see path correction information."
+    
+    # Add some basic information to the output file so it's not empty
+    echo "=== PROCESSING RESULTS ====" >> "$OUTPUT_FILE"
+    echo "No pack files were successfully processed." >> "$OUTPUT_FILE"
+    echo "This could be due to:" >> "$OUTPUT_FILE"
+    echo "1. Repository paths in the input file are incorrect or have format issues" >> "$OUTPUT_FILE"
+    echo "2. The repositories no longer exist on this server" >> "$OUTPUT_FILE"
+    echo "3. The pack files specified no longer exist" >> "$OUTPUT_FILE"
+    echo "" >> "$OUTPUT_FILE"
+    echo "Try running: bash $0 -f \"$INPUT_FILE\" -v" >> "$OUTPUT_FILE"
+    echo "to see more detailed error information." >> "$OUTPUT_FILE"
+fi
