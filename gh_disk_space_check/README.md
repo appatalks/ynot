@@ -95,6 +95,12 @@ sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads
 
 # Run with custom thresholds and object resolution
 SIZE_MIN_MB=1 SIZE_MAX_MB=25 RESOLVE_OBJECTS=true sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
+
+# Run with parallel processing and 8 jobs (requires GNU parallel)
+PARALLEL_JOBS=8 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
+
+# Disable parallel processing
+USE_PARALLEL=false sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
 ```
 
 ### resolve-pack-objects.sh

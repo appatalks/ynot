@@ -156,6 +156,7 @@ USE_PARALLEL_FINAL=$USE_PARALLEL
 if [ "$USE_PARALLEL" = true ] && ! command -v parallel &>/dev/null; then
     echo "WARNING: GNU Parallel not found. Parallel processing disabled."
     echo "Install with: sudo apt-get install parallel"
+    echo "On GitHub Enterprise Server, run: sudo apt-get update && sudo apt-get install -y parallel"
     USE_PARALLEL_FINAL=false
 fi
 
@@ -247,12 +248,85 @@ touch /tmp/repo_ids_over_max.list /tmp/repo_ids_between.list
 if [ "$USE_PARALLEL_FINAL" = true ]; then
     echo "Using parallel processing with $PARALLEL_JOBS jobs..."
     
-    # Initialize a counter for display
-    repo_counter=0
+    # For one-liner scripts, we need a different approach since functions aren't exported to parallel
+    # Create a temporary script with the function and execution code
+    cat > /tmp/repo_processor.$$.sh << EOL
+#!/bin/bash
+
+# Copy of the process_repo function
+process_repo() {
+    local REPO=\$1
+    local repo_count=\$2
+    local total_repos=\$3
+    local REPO_NAME=\$(echo "\$REPO" | sed 's|/data/user/repositories/||g' | sed 's|\.git\$||g')
     
-    # Use parallel to process repositories
+    # Determine proper format for repo name
+    local display_repo_name="\$REPO_NAME"
+    
+    if command -v ghe-nwo &> /dev/null; then
+        local nwo=\$(sudo ghe-nwo "\$REPO" 2>/dev/null)
+        if [ -n "\$nwo" ]; then
+            display_repo_name="\$nwo"
+        fi
+    fi
+    
+    echo "[\$repo_count/\$total_repos] Checking \$display_repo_name..."
+    
+    local has_file_over_max=0
+    local has_file_between=0
+    
+    # Look for large files
+    local large_files=\$(sudo find \$REPO -type f -size +${SIZE_MIN_MB}M 2>/dev/null)
+    
+    if [ -n "\$large_files" ]; then
+        while IFS= read -r file; do
+            if ! sudo test -f "\$file"; then
+                continue
+            fi
+            
+            local file_size=\$(sudo stat -c '%s' "\$file" 2>/dev/null)
+            if [ -z "\$file_size" ]; then
+                continue
+            fi
+            
+            if [ "\$file_size" -ge 1073741824 ]; then
+                local size_display="\$(echo "scale=2; \$file_size/1073741824" | bc)GB"
+            elif [ "\$file_size" -ge 1048576 ]; then
+                local size_display="\$(echo "scale=2; \$file_size/1048576" | bc)MB"
+            else
+                local size_display="\$(echo "scale=2; \$file_size/1024" | bc)KB"
+            fi
+            
+            if [ "\$file_size" -gt "$SIZE_MAX_BYTES" ]; then
+                flock ${over_max_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> ${over_max_file}.tmp"
+                has_file_over_max=1
+            elif [ "\$file_size" -gt "$SIZE_MIN_BYTES" ]; then
+                flock ${between_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> ${between_file}.tmp"
+                has_file_between=1
+            fi
+        done <<< "\$large_files"
+    fi
+    
+    if [ "\$has_file_over_max" -eq 1 ]; then
+        flock /tmp/repo_ids_over_max.lock -c "echo \"\$REPO\" >> /tmp/repo_ids_over_max.list"
+    fi
+    
+    if [ "\$has_file_between" -eq 1 ]; then
+        flock /tmp/repo_ids_between.lock -c "echo \"\$REPO\" >> /tmp/repo_ids_between.list"
+    fi
+}
+
+# Execute with passed parameters
+process_repo "\$1" "\$2" "\$3"
+EOL
+    chmod +x /tmp/repo_processor.$$.sh
+    
+    # Use parallel with the temp script instead of the function directly
     echo "$REPOS" | parallel --will-cite -j "$PARALLEL_JOBS" \
-        "repo_counter=\$(( repo_counter + 1 )); process_repo {} \$repo_counter $TOTAL_REPOS"
+        "/tmp/repo_processor.$$.sh {} {#} $TOTAL_REPOS"
+    
+    # Clean up
+    rm -f /tmp/repo_processor.$$.sh
 else
     # Process sequentially
     repo_count=0
