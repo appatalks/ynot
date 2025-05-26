@@ -83,6 +83,63 @@ echo "Processing $TOTAL_ENTRIES pack files from $INPUT_FILE"
 echo "Results will be saved to $OUTPUT_FILE"
 echo ""
 
+# First, analyze the input file to group entries by repository
+echo "Analyzing input file and grouping by repository..."
+declare -A repo_entries
+declare -A repo_sizes
+total_lines=0
+
+while IFS= read -r line; do
+    # Split the line at the colon for repo_name and file_info
+    repo_name=$(echo "$line" | cut -d':' -f1 | xargs)
+    file_info=$(echo "$line" | cut -d':' -f2- | xargs)
+    
+    # Extract size if available
+    if [[ "$file_info" =~ \(([0-9]+)[[:space:]]*[A-Za-z]+\) ]]; then
+        size=${BASH_REMATCH[1]}
+        
+        # Add to the repository's total size
+        current_size=${repo_sizes[$repo_name]:-0}
+        repo_sizes[$repo_name]=$((current_size + size))
+    fi
+    
+    # Count entries per repository
+    repo_entries[$repo_name]=$((${repo_entries[$repo_name]:-0} + 1))
+    total_lines=$((total_lines + 1))
+done < "$INPUT_FILE"
+
+# Sort repositories by size for intelligent prioritization
+echo "Sorting repositories by total size to prioritize processing..."
+declare -a sorted_repos=()
+
+# Create a temporary file for sorting
+tmp_sort_file=$(mktemp)
+for repo_name in "${!repo_sizes[@]}"; do
+    echo "${repo_sizes[$repo_name]} $repo_name" >> "$tmp_sort_file"
+done
+
+# Sort by size in descending order and extract repo names
+readarray -t sorted_repos < <(sort -nr "$tmp_sort_file" | awk '{print $2}')
+rm -f "$tmp_sort_file"
+
+# Display top 5 largest repositories for context
+echo "Top 5 largest repositories (by pack file size):"
+for ((i=0; i<5 && i<${#sorted_repos[@]}; i++)); do
+    repo="${sorted_repos[$i]}"
+    size_mb=$((${repo_sizes[$repo]} / 1024 / 1024))
+    echo "  $repo: ${size_mb}MB (${repo_entries[$repo]} pack files)"
+done
+echo ""
+echo "Found $total_lines entries across ${#repo_entries[@]} repositories"
+echo "Prioritizing repositories with the largest objects..."
+
+# Create a priority list of repositories
+priority_repos=$(
+    for repo in "${!repo_sizes[@]}"; do
+        echo "$repo ${repo_sizes[$repo]}"
+    done | sort -k2,2nr | head -20 | awk '{print $1}'
+)
+
 # Process each line in the input file
 processed=0
 cat "$INPUT_FILE" | while read -r line; do
@@ -99,6 +156,11 @@ cat "$INPUT_FILE" | while read -r line; do
             size="${BASH_REMATCH[1]}"
         else
             size="unknown"
+        fi
+        
+        # Skip low priority repositories if we have too many entries
+        if [ ${#repo_entries[@]} -gt 10 ] && ! echo "$priority_repos" | grep -q "^$repo_name$"; then
+            continue
         fi
         
         # Handle both formats: directory path or organization/repo format
@@ -145,9 +207,48 @@ cat "$INPUT_FILE" | while read -r line; do
                 echo "Repository path: $repo_path" >> "$OUTPUT_FILE"
                 echo "" >> "$OUTPUT_FILE"
                 
-                # Run the resolver script with sudo
+                # Run the resolver script with sudo and dynamic TOP_OBJECTS adjustment
                 echo "Running resolver with sudo..."
-                sudo "$RESOLVER_SCRIPT" -p "$pack_path" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$TOP_OBJECTS" >> "$OUTPUT_FILE" 2>&1
+                
+                # Dynamic TOP_OBJECTS adjustment based on repository context
+                adjusted_top_objects=$TOP_OBJECTS
+                
+                # Adjust based on repository size
+                repo_size=${repo_sizes[$repo_name]:-0}
+                repo_size_mb=$((repo_size / 1024 / 1024))
+                
+                # If this is a very large repo, reduce the number of objects to extract
+                if [ "$repo_size_mb" -gt 1000 ]; then # >1GB
+                    adjusted_top_objects=3
+                elif [ "$repo_size_mb" -gt 500 ]; then # >500MB
+                    adjusted_top_objects=5
+                elif [ "$repo_size_mb" -gt 250 ]; then # >250MB
+                    adjusted_top_objects=7
+                fi
+                
+                # Further adjust based on total repository count
+                if [ ${#repo_entries[@]} -gt 50 ] && [ "$adjusted_top_objects" -gt 5 ]; then
+                    adjusted_top_objects=5  # Many repositories, be more selective
+                fi
+                
+                # Check if this is a priority repository and give more objects for high-priority repos
+                if echo "$priority_repos" | grep -q "^$repo_name$" && [ "${#sorted_repos[@]}" -le 10 ]; then
+                    # For top priority repos in small installations, allow more objects
+                    adjusted_top_objects=$TOP_OBJECTS
+                fi
+                
+                # Run the resolver with the adjusted value and batch mode for performance
+                echo "Using TOP_OBJECTS=$adjusted_top_objects for this repository (default=$TOP_OBJECTS)" >> "$OUTPUT_FILE"
+                
+                # Enable batch mode for improved performance with multiple pack files
+                # This allows caching repository data between multiple pack file analyses
+                if [ ${#repo_entries[@]} -gt 3 ]; then
+                    echo "Enabling batch mode for more efficient processing" >> "$OUTPUT_FILE"
+                    sudo "$RESOLVER_SCRIPT" -p "$pack_path" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$adjusted_top_objects" -b -T 60 >> "$OUTPUT_FILE" 2>&1
+                else
+                    # For repositories with few pack files, batch mode overhead isn't worth it
+                    sudo "$RESOLVER_SCRIPT" -p "$pack_path" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$adjusted_top_objects" >> "$OUTPUT_FILE" 2>&1
+                fi
             else
                 echo "ERROR: Pack file not found. Repository exists but the pack file does not:" >> "$OUTPUT_FILE"
                 echo "  Repository path: $repo_path" >> "$OUTPUT_FILE"

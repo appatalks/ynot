@@ -140,3 +140,87 @@ This helps you identify specific large files within each repository, rather than
    - Mark objects as [unresolved], [detached], or [unknown] depending on what was found
    - Show instructions for further investigation
 
+## Performance Optimizations for Large Installations
+
+The scripts include various optimizations for installations with large numbers of repositories:
+
+### Dynamic TOP_OBJECTS Adjustment
+
+The system intelligently adjusts how many objects to analyze per repository based on:
+
+- **Repository Size**: Larger repositories are processed with stricter object limits
+  - >2GB repos: Only 2 objects analyzed
+  - >1GB repos: Only 3 objects analyzed
+  - >500MB repos: Only 5 objects analyzed
+  - The thresholds are adjusted automatically
+
+- **Repository Count**: When dealing with many repositories, the scripts automatically:
+  - Reduce the number of objects analyzed per repository
+  - Prioritize repositories with the largest objects
+  - Process only a subset of repositories if too many are found
+
+### Performance Control Parameters
+
+You can control the performance behavior with these environment variables:
+
+```sh
+# To process more repositories in detail
+MAX_REPOS=100 sudo bash repo-filesize-analysis.sh
+
+# To analyze more objects per repository
+TOP_OBJECTS=20 sudo bash repo-filesize-analysis.sh
+
+# To disable automatic TOP_OBJECTS adjustment (not recommended for large installations)
+AUTO_ADJUST_TOP_OBJECTS=false sudo bash repo-filesize-analysis.sh
+```
+
+### Repository Prioritization
+
+The scripts automatically prioritize repositories:
+
+- Repositories are sorted by total size
+- The largest repositories are processed first
+- Small repositories with few large files are processed efficiently with appropriate settings
+
+This ensures that even on very large installations, you'll get useful results within a reasonable time frame.
+
+### Parallel Processing and Batch Mode
+
+For large installations with many repositories, the scripts support parallel processing and batch mode:
+
+#### Parallel Repository Scanning
+
+The `repo-filesize-analysis.sh` script can scan repositories in parallel:
+
+```sh
+# Enable parallel processing with 8 jobs
+sudo bash repo-filesize-analysis.sh --parallel 8
+
+# Disable parallel processing
+sudo bash repo-filesize-analysis.sh --no-parallel
+```
+
+Requirements for parallel processing:
+- GNU Parallel must be installed (`sudo apt-get install parallel`)
+- Significantly reduces time needed to scan large numbers of repositories
+- Automatically detects if GNU Parallel is available
+
+#### Batch Mode for Object Resolution
+
+The `resolve-pack-objects.sh` script includes a batch mode that caches repository data:
+
+```sh
+# Enable batch mode (suitable for repositories with multiple pack files)
+./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git -b
+
+# Set a custom timeout for Git operations that might hang
+./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git -b -T 60
+```
+
+Benefits of batch mode:
+- Caches repository data between multiple pack file analyses
+- Reuses Git operations to minimize redundant work
+- Improves performance when analyzing multiple pack files from the same repository
+
+These optimization features are automatically leveraged by the `process-packs-report.sh` script when appropriate.
+
