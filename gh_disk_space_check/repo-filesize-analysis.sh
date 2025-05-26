@@ -24,6 +24,12 @@ repos_between=""
 echo "Analyzing repositories in /data/user/repositories..."
 echo "Total repository storage: $(sudo du -hsx /data/user/repositories/)"
 
+# Check if ghe-nwo is available
+if ! command -v ghe-nwo &> /dev/null; then
+    echo "WARNING: 'ghe-nwo' command not found. Repository IDs will be used instead of names."
+    echo "For best results, run this script on a GitHub Enterprise server where ghe-nwo is available."
+fi
+
 # Get list of repositories
 REPOS=$(sudo find /data/user/repositories -name "*.git" -type d)
 TOTAL_REPOS=$(echo "$REPOS" | wc -l)
@@ -57,12 +63,21 @@ for REPO in $REPOS; do
                 size_mb=$((size_bytes / 1024 / 1024))
                 file_path=$(echo "$file" | sed "s|$REPO/||")
                 
+                # Get repository name with owner using ghe-nwo if available
+                REPO_DISPLAY_NAME=$REPO_NAME
+                if command -v ghe-nwo &> /dev/null; then
+                    GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
+                    if [ -n "$GHE_NWO" ]; then
+                        REPO_DISPLAY_NAME=$GHE_NWO
+                    fi
+                fi
+                
                 if [ "$size_bytes" -ge "$SIZE_MAX_BYTES" ]; then
-                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $over_max_file
+                    echo "$REPO_DISPLAY_NAME: $file_path ($size_mb MB)" >> $over_max_file
                     files_over_max=$((files_over_max + 1))
                     has_file_over_max=1
                 elif [ "$size_bytes" -ge "$SIZE_MIN_BYTES" ]; then
-                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $between_file
+                    echo "$REPO_DISPLAY_NAME: $file_path ($size_mb MB)" >> $between_file
                     files_between=$((files_between + 1))
                     has_file_between=1
                 fi
@@ -88,12 +103,21 @@ for REPO in $REPOS; do
                 if [ -n "$filename" ]; then
                     size_mb=$((size / 1024 / 1024))
                     
+                    # Get repository name with owner using ghe-nwo if available
+                    REPO_DISPLAY_NAME=$REPO_NAME
+                    if command -v ghe-nwo &> /dev/null; then
+                        GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
+                        if [ -n "$GHE_NWO" ]; then
+                            REPO_DISPLAY_NAME=$GHE_NWO
+                        fi
+                    fi
+                    
                     if [ $size -ge $SIZE_MAX_BYTES ]; then
-                        echo "$REPO_NAME: $filename ($size_mb MB)" >> $over_max_file
+                        echo "$REPO_DISPLAY_NAME: $filename ($size_mb MB)" >> $over_max_file
                         files_over_max=$((files_over_max + 1))
                         has_file_over_max=1
                     elif [ $size -ge $SIZE_MIN_BYTES ]; then
-                        echo "$REPO_NAME: $filename ($size_mb MB)" >> $between_file
+                        echo "$REPO_DISPLAY_NAME: $filename ($size_mb MB)" >> $between_file
                         files_between=$((files_between + 1))
                         has_file_between=1
                     fi
@@ -106,11 +130,29 @@ for REPO in $REPOS; do
     if [ $has_file_over_max -eq 1 ]; then
         repos_with_files_over_max=$((repos_with_files_over_max + 1))
         repos_with_files_over_min=$((repos_with_files_over_min + 1))
-        repos_over_max="$repos_over_max $REPO_NAME"
+        
+        # Get repository name with owner using ghe-nwo if available
+        REPO_DISPLAY_NAME=$REPO_NAME
+        if command -v ghe-nwo &> /dev/null; then
+            GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
+            if [ -n "$GHE_NWO" ]; then
+                REPO_DISPLAY_NAME=$GHE_NWO
+            fi
+        fi
+        repos_over_max="$repos_over_max $REPO_DISPLAY_NAME"
     elif [ $has_file_between -eq 1 ]; then
         repos_with_files_between=$((repos_with_files_between + 1))
-        repos_with_files_over_min=$((repos_with_files_over_min + 1)) 
-        repos_between="$repos_between $REPO_NAME"
+        repos_with_files_over_min=$((repos_with_files_over_min + 1))
+        
+        # Get repository name with owner using ghe-nwo if available
+        REPO_DISPLAY_NAME=$REPO_NAME
+        if command -v ghe-nwo &> /dev/null; then
+            GHE_NWO=$(sudo ghe-nwo "$REPO" 2>/dev/null)
+            if [ -n "$GHE_NWO" ]; then
+                REPO_DISPLAY_NAME=$GHE_NWO
+            fi
+        fi
+        repos_between="$repos_between $REPO_DISPLAY_NAME"
     fi
 done
 
