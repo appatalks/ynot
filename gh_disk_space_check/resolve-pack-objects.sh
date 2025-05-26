@@ -81,46 +81,53 @@ TEMP_FILE=$(mktemp)
 chmod 666 "$TEMP_FILE" 2>/dev/null
 
 # Get object sizes from the pack and filter by size - using sudo for Git operations
-sudo git verify-pack -v "$IDX_FILE" 2>/dev/null | sort -k 3 -n -r | head -n "$TOP_OBJECTS" | 
-while read -r hash type size size_in_packfile offset_in_packfile depth base_sha1; do
-    if [ -n "$size" ] && [ "$size" -ge "$MIN_SIZE_BYTES" ]; then
-        # Try to get the object info
-        object_info=$(sudo git rev-list --objects --all 2>/dev/null | grep "$hash" 2>/dev/null)
-        if [ -n "$object_info" ]; then
-            filename=$(echo "$object_info" | awk '{print $2}')
+echo "Extracting largest objects (this may take a moment)..."
+
+# Get just the largest objects, and do it all at once to minimize Git operations
+sudo git verify-pack -v "$IDX_FILE" 2>/dev/null | 
+sort -k 3 -n -r | 
+head -n "$TOP_OBJECTS" > /tmp/large_objects.$$
+
+# If we need to resolve filenames, do it more efficiently by getting all objects at once
+# rather than calling git commands repeatedly
+if [ -s /tmp/large_objects.$$ ]; then
+    HASH_LIST=$(awk '{print $1}' /tmp/large_objects.$$)
+    
+    # Use a single call to rev-list rather than calling it for each hash
+    if [ -n "$HASH_LIST" ]; then
+        # Only do this for the first few largest objects to avoid lengthy operations
+        # Get a subset of object mappings for performance
+        echo "Getting object names for the largest objects..."
+        sudo git rev-list --objects --all | grep -f <(echo "$HASH_LIST" | head -20) > /tmp/file_mappings.$$ 2>/dev/null
+    fi
+    
+    # Now process each object
+    while read -r hash type size rest; do
+        if [ -n "$size" ] && [ "$size" -ge "$MIN_SIZE_BYTES" ]; then
             size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
+            
+            # Try to find the filename from our pre-fetched mappings
+            if [ -f /tmp/file_mappings.$$ ]; then
+                filename=$(grep "^$hash" /tmp/file_mappings.$$ | awk '{print $2}')
+            else
+                filename=""
+            fi
             
             if [ -n "$filename" ]; then
                 echo "$hash $size_mb MB $filename" >> "$TEMP_FILE"
             else
-                # If no filename is found, try to identify the object type
-                obj_type=$(sudo git cat-file -t "$hash" 2>/dev/null)
-                echo "$hash $size_mb MB [unknown $obj_type object]" >> "$TEMP_FILE"
-            fi
-        else
-            # Try another approach to find the file
-            size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
-            
-            # Try with Git log
-            file_found=0
-            sudo git log --all --pretty=format: --name-only --diff-filter=A 2>/dev/null | 
-            sudo git cat-file --batch-check='%(objectname) %(objectsize)' 2>/dev/null |
-            grep "^$hash" 2>/dev/null | 
-            while read -r found_hash found_size; do
-                if [ "$found_hash" = "$hash" ]; then
-                    echo "$hash $size_mb MB [detached object]" >> "$TEMP_FILE"
-                    file_found=1
-                    break
-                fi
-            done
-            
-            # If still not found, provide the basic info we have
-            if [ $file_found -eq 0 ]; then
-                echo "$hash $size_mb MB [unresolved object]" >> "$TEMP_FILE"
+                # Just get the type without trying to resolve the full name
+                obj_type=$(sudo git cat-file -t "$hash" 2>/dev/null || echo "unknown")
+                echo "$hash $size_mb MB [${obj_type} object]" >> "$TEMP_FILE"
             fi
         fi
-    fi
-done
+    done < /tmp/large_objects.$$
+    
+    # Clean up temporary files
+    rm -f /tmp/large_objects.$$ /tmp/file_mappings.$$ 2>/dev/null
+else
+    echo "No large objects found in pack."
+fi
 
 # Display results
 echo ""

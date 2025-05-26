@@ -107,24 +107,17 @@ cat "$INPUT_FILE" | while read -r line; do
             repo_org=$(echo "$repo_name" | cut -d'/' -f1)
             repo_project=$(echo "$repo_name" | cut -d'/' -f2-)
             
-            # Try multiple potential repository paths
-            potential_paths=(
-                "${REPOSITORY_BASE}/${repo_name}.git"
-                "${REPOSITORY_BASE}/${repo_org}/${repo_project}.git"
-                "${REPOSITORY_BASE}/${repo_name}"
-            )
+            # Most likely path format based on standard GitHub Enterprise structure
+            repo_path="${REPOSITORY_BASE}/${repo_name}.git"
             
-            repo_path=""
-            for path in "${potential_paths[@]}"; do
-                if sudo test -d "$path"; then
-                    repo_path="$path"
-                    break
+            # Only if that doesn't exist, try the alternative paths
+            if ! sudo test -d "$repo_path"; then
+                if sudo test -d "${REPOSITORY_BASE}/${repo_org}/${repo_project}.git"; then
+                    repo_path="${REPOSITORY_BASE}/${repo_org}/${repo_project}.git"
+                elif sudo test -d "${REPOSITORY_BASE}/${repo_name}"; then
+                    repo_path="${REPOSITORY_BASE}/${repo_name}"
                 fi
-            done
-            
-            # If no path was found, default to the first one
-            if [ -z "$repo_path" ]; then
-                repo_path="${potential_paths[0]}"
+                # If still not found, we'll stick with the default
             fi
         else
             # This is a direct path reference
