@@ -153,11 +153,19 @@ sudo chmod 666 ${over_max_file}.tmp ${between_file}.tmp
 
 # Check for GNU Parallel
 USE_PARALLEL_FINAL=$USE_PARALLEL
-if [ "$USE_PARALLEL" = true ] && ! command -v parallel &>/dev/null; then
-    echo "WARNING: GNU Parallel not found. Parallel processing disabled."
-    echo "Install with: sudo apt-get install parallel"
-    echo "On GitHub Enterprise Server, run: sudo apt-get update && sudo apt-get install -y parallel"
-    USE_PARALLEL_FINAL=false
+if [ "$USE_PARALLEL" = true ]; then
+    if ! command -v parallel &>/dev/null; then
+        echo "WARNING: GNU Parallel not found. Parallel processing disabled."
+        echo "Install with: sudo apt-get install parallel"
+        echo "On GitHub Enterprise Server, run: sudo apt-get update && sudo apt-get install -y parallel"
+        USE_PARALLEL_FINAL=false
+    else
+        # Make sure parallel version is compatible
+        parallel --no-notice --version >/dev/null 2>&1 || {
+            echo "WARNING: Your version of GNU Parallel may have issues. Disabling parallel processing."
+            USE_PARALLEL_FINAL=false
+        }
+    fi
 fi
 
 # Create a function to process one repository
@@ -249,15 +257,23 @@ if [ "$USE_PARALLEL_FINAL" = true ]; then
     echo "Using parallel processing with $PARALLEL_JOBS jobs..."
     
     # For one-liner scripts, we need a different approach since functions aren't exported to parallel
-    # Create a temporary script with the function and execution code
+    # Create a temporary script that's completely standalone with all variables needed
     cat > /tmp/repo_processor.$$.sh << EOL
 #!/bin/bash
 
-# Copy of the process_repo function
-process_repo() {
-    local REPO=\$1
-    local repo_count=\$2
-    local total_repos=\$3
+# Export all necessary variables that were passed into the main script
+SIZE_MIN_MB=${SIZE_MIN_MB}
+SIZE_MAX_MB=${SIZE_MAX_MB}
+SIZE_MIN_BYTES=${SIZE_MIN_BYTES}
+SIZE_MAX_BYTES=${SIZE_MAX_BYTES}
+over_max_file="${over_max_file}"
+between_file="${between_file}"
+
+# Standalone version of process_repo function
+process_one_repo() {
+    local REPO="\$1"
+    local repo_count="\$2"
+    local total_repos="\$3"
     local REPO_NAME=\$(echo "\$REPO" | sed 's|/data/user/repositories/||g' | sed 's|\.git\$||g')
     
     # Determine proper format for repo name
@@ -276,7 +292,7 @@ process_repo() {
     local has_file_between=0
     
     # Look for large files
-    local large_files=\$(sudo find \$REPO -type f -size +${SIZE_MIN_MB}M 2>/dev/null)
+    local large_files=\$(sudo find \$REPO -type f -size +\${SIZE_MIN_MB}M 2>/dev/null)
     
     if [ -n "\$large_files" ]; then
         while IFS= read -r file; do
@@ -297,11 +313,11 @@ process_repo() {
                 local size_display="\$(echo "scale=2; \$file_size/1024" | bc)KB"
             fi
             
-            if [ "\$file_size" -gt "$SIZE_MAX_BYTES" ]; then
-                flock ${over_max_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> ${over_max_file}.tmp"
+            if [ "\$file_size" -gt "\$SIZE_MAX_BYTES" ]; then
+                flock \${over_max_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> \${over_max_file}.tmp"
                 has_file_over_max=1
-            elif [ "\$file_size" -gt "$SIZE_MIN_BYTES" ]; then
-                flock ${between_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> ${between_file}.tmp"
+            elif [ "\$file_size" -gt "\$SIZE_MIN_BYTES" ]; then
+                flock \${between_file}.lock -c "echo \"\$REPO:\$file (\$size_display)\" >> \${between_file}.tmp"
                 has_file_between=1
             fi
         done <<< "\$large_files"
@@ -317,13 +333,13 @@ process_repo() {
 }
 
 # Execute with passed parameters
-process_repo "\$1" "\$2" "\$3"
+process_one_repo "\$1" "\$2" "\$3"
 EOL
     chmod +x /tmp/repo_processor.$$.sh
     
     # Use parallel with the temp script instead of the function directly
     echo "$REPOS" | parallel --will-cite -j "$PARALLEL_JOBS" \
-        "/tmp/repo_processor.$$.sh {} {#} $TOTAL_REPOS"
+        "/bin/bash /tmp/repo_processor.$$.sh {} {#} $TOTAL_REPOS"
     
     # Clean up
     rm -f /tmp/repo_processor.$$.sh

@@ -196,7 +196,7 @@ For large installations with many repositories, the scripts support parallel pro
 
 #### Parallel Repository Scanning
 
-The `repo-filesize-analysis.sh` script can scan repositories in parallel:
+The `repo-filesize-analysis.sh` script can scan repositories in parallel, which can dramatically speed up analysis on large installations:
 
 ```sh
 # Enable parallel processing with 8 jobs
@@ -208,8 +208,10 @@ sudo bash repo-filesize-analysis.sh --no-parallel
 
 Requirements for parallel processing:
 - GNU Parallel must be installed (`sudo apt-get install parallel`)
-- Significantly reduces time needed to scan large numbers of repositories
-- Automatically detects if GNU Parallel is available
+- On GitHub Enterprise Server: `sudo apt-get update && sudo apt-get install -y parallel`
+- Significantly reduces time needed to scan large numbers of repositories (up to 4-8x faster)
+- Automatically detects if GNU Parallel is available and falls back to sequential processing if not
+- Automatically creates a dynamic execution environment that works with one-liner curl execution
 
 #### Batch Mode for Object Resolution
 
