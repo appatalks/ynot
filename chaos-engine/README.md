@@ -26,6 +26,7 @@ The following modules are available:
 | `create-issues.sh` | Creates issues with comments, labels, and reactions | `NUM_ISSUES` |
 | `create-users.sh` | Creates test users and adds them to organizations | `NUM_USERS` |
 | `create-teams.sh` | Creates teams with varied settings and memberships | `NUM_TEAMS` |
+| `create-blob-data.sh` | Adds various sized files and media to repositories | `DATA_BLOBS` |
 | `check-user-limits.sh` | Checks GitHub instance for user license limits | N/A |
 | `clean-environment.sh` | Resets a GHES instance to near-fresh state | N/A |
 
@@ -51,6 +52,12 @@ export NUM_TEAMS=5    # Number of teams to create
 # Optional settings
 export AUTO_ADJUST_NUM_USERS=true  # Automatically adjust NUM_USERS based on license limits
 export RUN_PR_APPROACHES=false     # Set to true to run all PR edge case approaches (creates extra PRs)
+
+# Blob data options
+export DATA_BLOBS=false            # Set to true to add blob data to repositories
+export BLOB_MIN_SIZE=1             # Minimum size in MB for blob data per repository
+export BLOB_MAX_SIZE=10            # Maximum size in MB for blob data per repository
+export BLOB_REPOS_COUNT=3          # Number of repositories to add blob data to
 ```
 
 ## Usage
@@ -62,7 +69,7 @@ Run all modules:
 
 Run a specific module:
 ```bash
-./build-enterprise.sh [orgs|repos|prs|issues|users|teams|check|clean|help]
+./build-enterprise.sh [orgs|repos|prs|issues|users|teams|blobs|check|clean|help]
 ```
 
 ### Noninteractive Mode
@@ -74,6 +81,7 @@ All modules now support noninteractive mode, which skips all prompts and uses de
 - `create-issues.sh`
 - `create-teams.sh`
 - `create-users.sh`
+- `create-blob-data.sh`
 - `check-user-limits.sh`
 - `clean-environment.sh`
 

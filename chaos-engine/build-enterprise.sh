@@ -30,6 +30,7 @@ Options:
   issues    Create issues only
   users     Create users only
   teams     Create teams only
+  blobs     Add various sized files and media to repositories
   check     Check user license limits only
   clean     Clean up GHES environment (keeps only license and admin user)
   help      Display this help message
@@ -123,6 +124,20 @@ validate_env_vars() {
   # Validate boolean configurations
   validate_boolean "${RUN_PR_APPROACHES:-false}" "RUN_PR_APPROACHES" || true
   validate_boolean "${AUTO_ADJUST_NUM_USERS:-true}" "AUTO_ADJUST_NUM_USERS" || true
+  validate_boolean "${DATA_BLOBS:-false}" "DATA_BLOBS" || true
+  
+  # Validate blob size configurations if DATA_BLOBS is true
+  if [[ "${DATA_BLOBS:-false}" == "true" ]]; then
+    validate_numeric "${BLOB_MIN_SIZE:-1}" "BLOB_MIN_SIZE" 1 || true
+    validate_numeric "${BLOB_MAX_SIZE:-10}" "BLOB_MAX_SIZE" 1 || true
+    validate_numeric "${BLOB_REPOS_COUNT:-3}" "BLOB_REPOS_COUNT" 1 || true
+    
+    # Check if min size is less than or equal to max size
+    if [[ "${BLOB_MIN_SIZE:-1}" -gt "${BLOB_MAX_SIZE:-10}" ]]; then
+      echo "⚠ BLOB_MIN_SIZE (${BLOB_MIN_SIZE:-1}) cannot be larger than BLOB_MAX_SIZE (${BLOB_MAX_SIZE:-10})" >&2
+      missing=true
+    fi
+  fi
 
   # Get the values from config.env - don't use defaults
   # This ensures we use the actual values from the config file
@@ -135,6 +150,12 @@ validate_env_vars() {
   echo "- NUM_USERS: ${NUM_USERS}"
   echo "- NUM_TEAMS: ${NUM_TEAMS}"
   echo "- RUN_PR_APPROACHES: ${RUN_PR_APPROACHES:-false}"
+  echo "- DATA_BLOBS: ${DATA_BLOBS:-false}"
+  if [[ "${DATA_BLOBS:-false}" == "true" ]]; then
+    echo "- BLOB_MIN_SIZE: ${BLOB_MIN_SIZE:-1} MB"
+    echo "- BLOB_MAX_SIZE: ${BLOB_MAX_SIZE:-10} MB"
+    echo "- BLOB_REPOS_COUNT: ${BLOB_REPOS_COUNT:-3}"
+  fi
   
   # Validate numeric values
   if ! [[ "$NUM_ORGS" =~ ^[0-9]+$ ]]; then
@@ -160,9 +181,14 @@ validate_env_vars() {
   : "${NUM_USERS:=1}" 
   : "${NUM_TEAMS:=1}"
   : "${RUN_PR_APPROACHES:=false}"
+  : "${DATA_BLOBS:=false}"
+  : "${BLOB_MIN_SIZE:=1}"
+  : "${BLOB_MAX_SIZE:=10}"
+  : "${BLOB_REPOS_COUNT:=3}"
   
   # Export these values so they persist for any subsequent commands
   export NUM_ORGS NUM_REPOS NUM_PRS NUM_ISSUES NUM_USERS NUM_TEAMS RUN_PR_APPROACHES
+  export DATA_BLOBS BLOB_MIN_SIZE BLOB_MAX_SIZE BLOB_REPOS_COUNT
   
   # For validation purposes only, check module-specific variables
   if [[ "$MODE" == "all" ]]; then
@@ -177,6 +203,7 @@ validate_env_vars() {
       issues) if [[ -z "$NUM_ISSUES" ]]; then echo "⚠ Missing NUM_ISSUES in config.env" >&2; missing=true; fi ;;
       users) if [[ -z "$NUM_USERS" ]]; then echo "⚠ Missing NUM_USERS in config.env" >&2; missing=true; fi ;;
       teams) if [[ -z "$NUM_TEAMS" ]]; then echo "⚠ Missing NUM_TEAMS in config.env" >&2; missing=true; fi ;;
+      blobs) if [[ "$DATA_BLOBS" != "true" ]]; then echo "⚠ DATA_BLOBS must be set to 'true' to use this module" >&2; missing=true; fi ;;
     esac
   fi
   
@@ -248,6 +275,13 @@ case "$MODE" in
     else
       echo -e "\n⚠️  Skipping teams creation - no users available"
     fi
+    
+    # Add blob data if DATA_BLOBS is true
+    if [[ "${DATA_BLOBS:-false}" == "true" ]]; then
+      run_module_safe create-blob-data true
+    else
+      echo -e "\n⚠️  Skipping blob data creation - DATA_BLOBS is not set to 'true'"
+    fi
     ;;
   orgs)      run_module create-organizations ;;
   repos)     run_module create-repositories ;;
@@ -255,6 +289,7 @@ case "$MODE" in
   issues)    run_module create-issues ;;
   users)     run_module create-users ;;
   teams)     run_module create-teams ;;
+  blobs)     run_module create-blob-data ;;
   check)     run_module check-user-limits ;;
   clean)     
     if [[ "$GITHUB_SERVER_URL" == "https://github.com" ]]; then
