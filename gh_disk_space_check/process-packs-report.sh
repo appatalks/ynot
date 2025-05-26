@@ -85,41 +85,128 @@ echo ""
 
 # Process each line in the input file
 processed=0
-cat "$INPUT_FILE" | while IFS=: read -r repo_name file_info; do
+cat "$INPUT_FILE" | while read -r line; do
+    # Split the line at the colon for repo_name and file_info
+    repo_name=$(echo "$line" | cut -d':' -f1 | xargs)
+    file_info=$(echo "$line" | cut -d':' -f2- | xargs)
+    
     # Extract the pack file name and size
-    if [[ "$file_info" =~ objects/pack/pack-.*\.pack ]]; then
-        pack_file=$(echo "$file_info" | awk '{print $1}' | xargs)
-        size=$(echo "$file_info" | awk '{print $2, $3}' | tr -d '()' | xargs)
+    if [[ "$file_info" =~ (objects/pack/pack-[^[:space:]]+) ]]; then
+        pack_file=${BASH_REMATCH[1]}
         
-        # Construct the full path to the repository
-        repo_path="${REPOSITORY_BASE}/${repo_name}.git"
+        # Extract the size portion, which should be in parentheses at the end
+        if [[ "$file_info" =~ \(([0-9]+[[:space:]]*[A-Za-z]+)\) ]]; then
+            size="${BASH_REMATCH[1]}"
+        else
+            size="unknown"
+        fi
+        
+        # Handle both formats: directory path or organization/repo format
+        if [[ "$repo_name" == */* ]]; then
+            # This is likely an org/repo format
+            repo_org=$(echo "$repo_name" | cut -d'/' -f1)
+            repo_project=$(echo "$repo_name" | cut -d'/' -f2-)
+            
+            # Try multiple potential repository paths
+            potential_paths=(
+                "${REPOSITORY_BASE}/${repo_name}.git"
+                "${REPOSITORY_BASE}/${repo_org}/${repo_project}.git"
+                "${REPOSITORY_BASE}/${repo_name}"
+            )
+            
+            repo_path=""
+            for path in "${potential_paths[@]}"; do
+                if sudo test -d "$path"; then
+                    repo_path="$path"
+                    break
+                fi
+            done
+            
+            # If no path was found, default to the first one
+            if [ -z "$repo_path" ]; then
+                repo_path="${potential_paths[0]}"
+            fi
+        else
+            # This is a direct path reference
+            repo_path="${REPOSITORY_BASE}/${repo_name}"
+            if ! sudo test -d "$repo_path"; then
+                # Try with .git extension
+                if sudo test -d "${repo_path}.git"; then
+                    repo_path="${repo_path}.git"
+                fi
+            fi
+        fi
+        
         pack_path="${repo_path}/${pack_file}"
         
         processed=$((processed+1))
         echo "[$processed/$TOTAL_ENTRIES] Processing: $repo_name - $pack_file ($size)"
         
-        # Check if repository and pack file exist
-        if [ -d "$repo_path" ] && [ -f "$pack_path" ]; then
-            echo "==== Repository: $repo_name ====" >> "$OUTPUT_FILE"
-            echo "Pack file: $pack_file ($size)" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
-            
-            # Run the resolver script
-            "$RESOLVER_SCRIPT" -p "$pack_path" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$TOP_OBJECTS" >> "$OUTPUT_FILE" 2>&1
-            echo "" >> "$OUTPUT_FILE"
-            echo "----------------------------------------" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
+        echo "==== Repository: $repo_name ====" >> "$OUTPUT_FILE"
+        echo "Pack file: $pack_file ($size)" >> "$OUTPUT_FILE"
+        
+        # Use sudo to check if repository and pack file exist
+        if sudo test -d "$repo_path"; then
+            # Repository exists
+            if sudo test -f "$pack_path"; then
+                echo "Repository path: $repo_path" >> "$OUTPUT_FILE"
+                echo "" >> "$OUTPUT_FILE"
+                
+                # Run the resolver script with sudo
+                echo "Running resolver with sudo..."
+                sudo "$RESOLVER_SCRIPT" -p "$pack_path" -r "$repo_path" -m "$MIN_SIZE_MB" -t "$TOP_OBJECTS" >> "$OUTPUT_FILE" 2>&1
+            else
+                echo "ERROR: Pack file not found. Repository exists but the pack file does not:" >> "$OUTPUT_FILE"
+                echo "  Repository path: $repo_path" >> "$OUTPUT_FILE"
+                echo "  Pack file: $pack_path" >> "$OUTPUT_FILE"
+                
+                # List available pack files
+                echo "" >> "$OUTPUT_FILE"
+                echo "Available pack files in repository:" >> "$OUTPUT_FILE"
+                sudo find "$repo_path/objects/pack" -name "*.pack" -type f 2>/dev/null | sudo xargs -r ls -lah 2>/dev/null >> "$OUTPUT_FILE"
+            fi
         else
-            echo "==== Repository: $repo_name ====" >> "$OUTPUT_FILE"
-            echo "ERROR: Repository or pack file not found:" >> "$OUTPUT_FILE"
+            echo "ERROR: Repository not found:" >> "$OUTPUT_FILE"
             echo "  Repository path: $repo_path" >> "$OUTPUT_FILE"
-            echo "  Pack file: $pack_path" >> "$OUTPUT_FILE"
+            
+            # Try to find similar repositories
             echo "" >> "$OUTPUT_FILE"
-            echo "----------------------------------------" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
+            echo "Searching for similar repositories:" >> "$OUTPUT_FILE"
+            if [[ "$repo_name" == */* ]]; then
+                repo_org=$(echo "$repo_name" | cut -d'/' -f1)
+                sudo find "${REPOSITORY_BASE}" -name "${repo_org}*" -type d 2>/dev/null | head -5 >> "$OUTPUT_FILE"
+            fi
         fi
+        
+        echo "" >> "$OUTPUT_FILE"
+        echo "----------------------------------------" >> "$OUTPUT_FILE"
+        echo "" >> "$OUTPUT_FILE"
     else
-        echo "Warning: Line does not contain a pack file reference: $repo_name:$file_info"
+        echo "Warning: Line does not contain a recognized pack file reference: $line"
+        
+        echo "==== Unrecognized format ====" >> "$OUTPUT_FILE"
+        echo "Original line: $line" >> "$OUTPUT_FILE"
+        echo "" >> "$OUTPUT_FILE"
+        
+        # Try to extract any .pack or .idx reference
+        if [[ "$line" =~ (pack-[[:alnum:]]+\.(pack|idx)) ]]; then
+            potential_pack="${BASH_REMATCH[1]}"
+            echo "Potential pack file reference found: $potential_pack" >> "$OUTPUT_FILE"
+            
+            # Try to find this in the repositories
+            echo "Searching for this pack file in repositories..." >> "$OUTPUT_FILE"
+            search_result=$(sudo find "${REPOSITORY_BASE}" -name "$potential_pack" -type f 2>/dev/null | head -3)
+            if [ -n "$search_result" ]; then
+                echo "Found in:" >> "$OUTPUT_FILE"
+                echo "$search_result" >> "$OUTPUT_FILE"
+            else
+                echo "Not found in repository storage." >> "$OUTPUT_FILE"
+            fi
+        fi
+        
+        echo "" >> "$OUTPUT_FILE"
+        echo "----------------------------------------" >> "$OUTPUT_FILE"
+        echo "" >> "$OUTPUT_FILE"
     fi
 done
 

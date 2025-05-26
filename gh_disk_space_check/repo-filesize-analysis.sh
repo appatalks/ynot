@@ -64,7 +64,7 @@ for REPO in $REPOS; do
     
     # Look for loose objects first (simpler for very small repos)
     # Run a simple find command to identify large files by size
-    large_files=$(sudo find $REPO -type f -size +${SIZE_MIN_MB}M)
+    large_files=$(sudo find $REPO -type f -size +${SIZE_MIN_MB}M 2>/dev/null)
     
     if [ -n "$large_files" ]; then
         for file in $large_files; do
@@ -73,12 +73,23 @@ for REPO in $REPOS; do
                 size_mb=$((size_bytes / 1024 / 1024))
                 file_path=$(echo "$file" | sed "s|$REPO/||")
                 
+                # Determine the proper format for the repo name to appear in output
+                display_repo_name="$REPO_NAME"
+                
+                # If we have ghe-nwo available, try to use it for better repo name display
+                if command -v ghe-nwo &> /dev/null; then
+                    nwo=$(sudo ghe-nwo "$REPO" 2>/dev/null)
+                    if [ -n "$nwo" ]; then
+                        display_repo_name="$nwo"
+                    fi
+                fi
+                
                 if [ "$size_bytes" -ge "$SIZE_MAX_BYTES" ]; then
-                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $over_max_file.tmp
+                    echo "$display_repo_name: $file_path ($size_mb MB)" >> $over_max_file.tmp
                     files_over_max=$((files_over_max + 1))
                     has_file_over_max=1
                 elif [ "$size_bytes" -ge "$SIZE_MIN_BYTES" ]; then
-                    echo "$REPO_NAME: $file_path ($size_mb MB)" >> $between_file.tmp
+                    echo "$display_repo_name: $file_path ($size_mb MB)" >> $between_file.tmp
                     files_between=$((files_between + 1))
                     has_file_between=1
                 fi

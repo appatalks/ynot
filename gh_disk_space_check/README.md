@@ -118,6 +118,25 @@ When you enable object resolution with `RESOLVE_OBJECTS=true`, the script will:
 1. First try to find the helper scripts in the same directory
 2. If not found, automatically download them from GitHub
 3. Generate detailed reports showing which actual files exist within the Git pack files
+4. Attempt to handle different repository path formats and permission issues
 
 This helps you identify specific large files within each repository, rather than just seeing the pack file names.
+
+### Important Notes on Permissions and Repository Paths
+
+1. **Run with sudo**: These scripts need to access Git repositories that may have restricted permissions, so they should be run with `sudo`.
+   
+2. **Repository Path Formats**: The scripts handle multiple repository path formats:
+   - `org/repo`: Standard organization/repository format
+   - Directory paths: Direct filesystem paths like `/data/user/repositories/org/repo.git`
+   
+3. **Repository Resolution**: If repositories can't be found, the scripts will:
+   - Try multiple potential locations (with/without .git suffix)
+   - Search for similar repositories and show alternatives
+   - Show available pack files in found repositories
+   
+4. **Unresolved Pack Files**: For pack files that can't be fully resolved, the script will:
+   - Show basic information about object size
+   - Mark objects as [unresolved], [detached], or [unknown] depending on what was found
+   - Show instructions for further investigation
 

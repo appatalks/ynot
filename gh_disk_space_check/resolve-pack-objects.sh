@@ -70,21 +70,22 @@ echo "Minimum size: $MIN_SIZE_MB MB"
 echo "Showing top $TOP_OBJECTS objects"
 echo "----------------------------------------"
 
-# Navigate to the repository
+# Navigate to the repository - use sudo to ensure permissions
 cd "$REPO_PATH" || { echo "Error: Cannot change to repository directory"; exit 1; }
 
 # Extract large objects from the pack
 echo "Extracting large objects from pack file..."
 
-# Create a temporary file
+# Create a temporary file with proper permissions
 TEMP_FILE=$(mktemp)
+chmod 666 "$TEMP_FILE" 2>/dev/null
 
-# Get object sizes from the pack and filter by size
-git verify-pack -v "$IDX_FILE" | sort -k 3 -n -r | head -n "$TOP_OBJECTS" | 
+# Get object sizes from the pack and filter by size - using sudo for Git operations
+sudo git verify-pack -v "$IDX_FILE" 2>/dev/null | sort -k 3 -n -r | head -n "$TOP_OBJECTS" | 
 while read -r hash type size size_in_packfile offset_in_packfile depth base_sha1; do
     if [ -n "$size" ] && [ "$size" -ge "$MIN_SIZE_BYTES" ]; then
         # Try to get the object info
-        object_info=$(git rev-list --objects --all | grep "$hash")
+        object_info=$(sudo git rev-list --objects --all 2>/dev/null | grep "$hash" 2>/dev/null)
         if [ -n "$object_info" ]; then
             filename=$(echo "$object_info" | awk '{print $2}')
             size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
@@ -93,20 +94,30 @@ while read -r hash type size size_in_packfile offset_in_packfile depth base_sha1
                 echo "$hash $size_mb MB $filename" >> "$TEMP_FILE"
             else
                 # If no filename is found, try to identify the object type
-                obj_type=$(git cat-file -t "$hash" 2>/dev/null)
+                obj_type=$(sudo git cat-file -t "$hash" 2>/dev/null)
                 echo "$hash $size_mb MB [unknown $obj_type object]" >> "$TEMP_FILE"
             fi
         else
             # Try another approach to find the file
-            git log --all --pretty=format: --name-only --diff-filter=A | 
-            git cat-file --batch-check='%(objectname) %(objectsize)' |
-            grep "^$hash" | 
+            size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
+            
+            # Try with Git log
+            file_found=0
+            sudo git log --all --pretty=format: --name-only --diff-filter=A 2>/dev/null | 
+            sudo git cat-file --batch-check='%(objectname) %(objectsize)' 2>/dev/null |
+            grep "^$hash" 2>/dev/null | 
             while read -r found_hash found_size; do
                 if [ "$found_hash" = "$hash" ]; then
                     echo "$hash $size_mb MB [detached object]" >> "$TEMP_FILE"
+                    file_found=1
                     break
                 fi
             done
+            
+            # If still not found, provide the basic info we have
+            if [ $file_found -eq 0 ]; then
+                echo "$hash $size_mb MB [unresolved object]" >> "$TEMP_FILE"
+            fi
         fi
     fi
 done
@@ -117,16 +128,35 @@ echo "Large objects in pack file (sorted by size):"
 echo "----------------------------------------"
 echo "SHA-1                                      Size      Filename"
 echo "----------------------------------------"
-sort -k 2 -n -r "$TEMP_FILE" | while read -r hash size_mb filename; do
-    printf "%-40s %-9s %s\n" "$hash" "$size_mb" "$filename"
-done
+if [ -s "$TEMP_FILE" ]; then
+    sort -k 2 -n -r "$TEMP_FILE" | while read -r hash size_mb filename; do
+        printf "%-40s %-9s %s\n" "$hash" "$size_mb" "$filename"
+    done
+else
+    echo "No large objects found or unable to access repository data."
+    echo "Try running the script with sudo or checking repository permissions."
+    
+    # Check if the pack file actually exists and is readable
+    if sudo test -f "$PACK_FILE"; then
+        echo ""
+        echo "Pack file information:"
+        sudo ls -lah "$PACK_FILE"
+        
+        # Check corresponding idx file
+        if sudo test -f "$IDX_FILE"; then
+            echo ""
+            echo "Index file information:"
+            sudo ls -lah "$IDX_FILE"
+        fi
+    fi
+fi
 
 # Clean up
-rm "$TEMP_FILE"
+rm -f "$TEMP_FILE" 2>/dev/null
 
 echo "----------------------------------------"
-echo "Note: If some objects are shown as '[unknown]' or '[detached object]',"
+echo "Note: If some objects are shown as '[unknown]', '[detached object]', or '[unresolved object]',"
 echo "they might be deleted in the latest commit but still present in history,"
 echo "or they could be large blobs that are part of larger files."
 echo ""
-echo "To further investigate, you can use: git log --all --find-object=<hash>"
+echo "To further investigate, you can use: sudo git -C \"$REPO_PATH\" log --all --find-object=<hash>"
