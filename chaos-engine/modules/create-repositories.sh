@@ -8,6 +8,30 @@ set -euo pipefail
 # modules/create-repositories.sh
 # Loads config from config.env and creates multiple repositories with varied settings
 
+# Check for noninteractive mode
+NONINTERACTIVE=false
+if [[ "${1:-}" == "--noninteractive" ]]; then
+  NONINTERACTIVE=true
+  echo "Running in noninteractive mode - will not prompt for confirmation"
+fi
+
+# Function to handle user prompts in noninteractive mode
+prompt_user() {
+  local prompt_text="$1"
+  local default_answer="${2:-y}"  # Default to 'y' if not specified
+  
+  if [[ "$NONINTERACTIVE" == "true" ]]; then
+    echo "     ℹ️ Running in noninteractive mode - automatically answering '${default_answer}'"
+    REPLY="${default_answer}"
+    return 0
+  else
+    echo "$prompt_text"
+    read -p "       " -n 1 -r
+    echo
+    return 0
+  fi
+}
+
 # Resolve directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -28,6 +52,61 @@ TS=$(date +%s)
 AUTH="Authorization: token ${GITHUB_TOKEN}"
 REPO_PREFIX="chaos-repo"
 TMP=$(mktemp -d)
+
+# Check if the organization exists with enhanced retry logic
+echo "Checking if organization ${ORG} exists..."
+MAX_RETRIES=15 # Extended retries to give org creation more time
+RETRY_COUNT=0
+ORG_EXISTS=false
+RETRY_DELAY=4 # In seconds, gradually increasing
+
+while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+  ORG_CHECK=$(curl -k -s -X GET -H "$AUTH" "$API/orgs/${ORG}" | jq -r '.login // empty')
+  if [[ -n "$ORG_CHECK" ]]; then
+    echo "✅ Organization ${ORG} exists."
+    ORG_EXISTS=true
+    # Wait a bit more to ensure organization is fully created
+    echo "   Waiting 5 seconds to ensure organization is fully provisioned..."
+    sleep 5
+    break
+  else
+    RETRY_COUNT=$((RETRY_COUNT+1))
+    # Increase delay with each retry (backoff strategy)
+    CURRENT_DELAY=$((RETRY_DELAY * (RETRY_COUNT / 2 + 1)))
+    echo "⚠️ Organization ${ORG} does not yet exist. Retry $RETRY_COUNT of $MAX_RETRIES..."
+    echo "   Waiting ${CURRENT_DELAY} seconds before next attempt..."
+    sleep "${CURRENT_DELAY}"
+  fi
+done
+
+if [[ "$ORG_EXISTS" != "true" ]]; then
+  echo "❌ Organization ${ORG} does not exist after $MAX_RETRIES attempts."
+  echo "Attempting to create the organization..."
+  
+  # Try to create the organization ourselves
+  BILLING_EMAIL="${BILLING_EMAIL:-admin@example.com}"
+  # Use ADMIN_USERNAME from config.env if set, otherwise use current authenticated user
+  ADMIN_USER=${ADMIN_USERNAME:-$(curl -k -s -X GET -H "$AUTH" "$API/user" | jq -r '.login')}
+  
+  # Show more detailed information for debugging
+  echo "   → Using admin user: $ADMIN_USER for organization creation"
+  echo "   → Using billing email: $BILLING_EMAIL"
+  
+  ORG_RESP=$(curl -k -s -X POST -H "$AUTH" "$API/admin/organizations" \
+    -d "{\"login\":\"${ORG}\",\"admin\":\"${ADMIN_USER}\",\"profile_name\":\"${ORG}\",\"billing_email\":\"${BILLING_EMAIL}\"}")
+  
+  if echo "$ORG_RESP" | jq -e '.login' > /dev/null; then
+    echo "✅ Created organization: ${ORG}"
+    # Wait for org to be fully provisioned
+    echo "   Waiting 10 seconds to ensure organization is fully provisioned..."
+    sleep 10
+    ORG_EXISTS=true
+  else
+    echo "❌ Failed to create organization. Response:"
+    echo "$ORG_RESP" | jq '.'
+    exit 1
+  fi
+fi
 
 echo "Creating $NUM_REPOS repositories in organization ${ORG}..."
 

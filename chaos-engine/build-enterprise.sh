@@ -49,7 +49,17 @@ MODE="$1"
 run_module() {
   local mod="$1"
   echo -e "\n➡️  Running module: $mod\n"
-  bash "$SCRIPT_DIR/modules/$mod.sh"
+  
+  # All modules now support the --noninteractive flag to suppress prompts
+  bash "$SCRIPT_DIR/modules/$mod.sh" --noninteractive
+  
+  local status=$?
+  if [[ $status -ne 0 ]]; then
+    echo -e "\n⚠️  Module $mod failed with exit code $status"
+  fi
+  
+  # Return the module's exit code
+  return $status
 }
 
 # Validate environment variables
@@ -71,16 +81,88 @@ validate_env_vars() {
     missing=true
   fi
   
-  # Set defaults for missing NUM_* variables
+  # Validate numeric values
+  validate_numeric() {
+    local val="$1"
+    local name="$2"
+    local min="${3:-0}"  # Default minimum is 0
+    
+    if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+      echo "⚠ Invalid $name value: ${val}. Must be a number." >&2
+      missing=true
+      return 1
+    elif [[ "$val" -lt "$min" ]]; then
+      echo "⚠ Invalid $name value: ${val}. Must be at least $min." >&2
+      missing=true
+      return 1
+    fi
+    return 0
+  }
+  
+  # Validate boolean values
+  validate_boolean() {
+    local val="$1"
+    local name="$2"
+    
+    if [[ "$val" != "true" && "$val" != "false" ]]; then
+      echo "⚠ Invalid $name value: ${val}. Must be 'true' or 'false'." >&2
+      missing=true
+      return 1
+    fi
+    return 0
+  }
+
+  # Validate numeric configurations with minimum values
+  validate_numeric "$NUM_ORGS" "NUM_ORGS" 1 || true
+  validate_numeric "$NUM_REPOS" "NUM_REPOS" 0 || true
+  validate_numeric "$NUM_PRS" "NUM_PRS" 0 || true
+  validate_numeric "$NUM_ISSUES" "NUM_ISSUES" 0 || true
+  validate_numeric "$NUM_USERS" "NUM_USERS" 0 || true
+  validate_numeric "$NUM_TEAMS" "NUM_TEAMS" 0 || true
+  
+  # Validate boolean configurations
+  validate_boolean "${RUN_PR_APPROACHES:-false}" "RUN_PR_APPROACHES" || true
+  validate_boolean "${AUTO_ADJUST_NUM_USERS:-true}" "AUTO_ADJUST_NUM_USERS" || true
+
+  # Get the values from config.env - don't use defaults
+  # This ensures we use the actual values from the config file
+  echo "Configuration values from config.env:"
+  echo "- ORG: ${ORG}"
+  echo "- NUM_ORGS: ${NUM_ORGS}"
+  echo "- NUM_REPOS: ${NUM_REPOS}" 
+  echo "- NUM_PRS: ${NUM_PRS}"
+  echo "- NUM_ISSUES: ${NUM_ISSUES}"
+  echo "- NUM_USERS: ${NUM_USERS}"
+  echo "- NUM_TEAMS: ${NUM_TEAMS}"
+  echo "- RUN_PR_APPROACHES: ${RUN_PR_APPROACHES:-false}"
+  
+  # Validate numeric values
+  if ! [[ "$NUM_ORGS" =~ ^[0-9]+$ ]]; then
+    echo "⚠ Invalid NUM_ORGS value: ${NUM_ORGS}. Must be a number." >&2
+    missing=true
+  fi
+  
+  if ! [[ "$NUM_REPOS" =~ ^[0-9]+$ ]]; then
+    echo "⚠ Invalid NUM_REPOS value: ${NUM_REPOS}. Must be a number." >&2
+    missing=true
+  fi
+  
+  if ! [[ "$NUM_PRS" =~ ^[0-9]+$ ]]; then
+    echo "⚠ Invalid NUM_PRS value: ${NUM_PRS}. Must be a number." >&2
+    missing=true
+  fi
+  
+  # Only set defaults if values are completely missing (shouldn't happen with source)
   : "${NUM_ORGS:=1}"
   : "${NUM_REPOS:=1}"
   : "${NUM_PRS:=1}"
   : "${NUM_ISSUES:=1}"
-  : "${NUM_USERS:=1}"
+  : "${NUM_USERS:=1}" 
   : "${NUM_TEAMS:=1}"
+  : "${RUN_PR_APPROACHES:=false}"
   
   # Export these values so they persist for any subsequent commands
-  export NUM_ORGS NUM_REPOS NUM_PRS NUM_ISSUES NUM_USERS NUM_TEAMS
+  export NUM_ORGS NUM_REPOS NUM_PRS NUM_ISSUES NUM_USERS NUM_TEAMS RUN_PR_APPROACHES
   
   # For validation purposes only, check module-specific variables
   if [[ "$MODE" == "all" ]]; then
@@ -113,7 +195,7 @@ run_module_safe() {
   local continue_on_error="${2:-false}"
   
   echo -e "\n➡️  Running module: $mod\n"
-  if bash "$SCRIPT_DIR/modules/$mod.sh"; then
+  if bash "$SCRIPT_DIR/modules/$mod.sh" --noninteractive; then
     echo -e "\n✅  Module $mod completed successfully"
     return 0
   else
@@ -152,16 +234,11 @@ case "$MODE" in
     fi
     
     # Check if we have users before creating teams
-    # If generated-users.txt doesn't exist or is empty, ask about team creation
+    # If generated-users.txt doesn't exist or is empty, teams will be without members
     if [[ ! -f "$SCRIPT_DIR/generated-users.txt" || ! -s "$SCRIPT_DIR/generated-users.txt" ]]; then
       echo -e "\n⚠️  No users available for teams. Teams will be created without members."
-      echo -n "Do you want to continue with team creation? (y/n) "
-      read -r CONTINUE_TEAMS
-      if [[ "$CONTINUE_TEAMS" =~ ^[Yy]$ ]]; then
-        run_module_safe create-teams true
-      else
-        echo -e "\n⚠️  Skipping team creation as requested"
-      fi
+      # In noninteractive mode, proceed with team creation
+      run_module_safe create-teams true
     else
       # We have users, proceed with team creation
       run_module_safe create-teams true

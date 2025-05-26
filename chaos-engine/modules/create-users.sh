@@ -1,12 +1,36 @@
 #!/usr/bin/env bash
 #
-# users come and go, their digital shadows remain
+# users as building blocks, organizations as structures
 #
 ####
 set -euo pipefail
 
 # modules/create-users.sh
 # Loads config from config.env and creates multiple test users
+
+# Check for noninteractive mode
+NONINTERACTIVE=false
+if [[ $# -gt 0 && "${1:-}" == "--noninteractive" ]]; then
+  NONINTERACTIVE=true
+  echo "Running in noninteractive mode - will not prompt for confirmation"
+fi
+
+# Function to handle user prompts in noninteractive mode
+prompt_user() {
+  local prompt_text="$1"
+  local default_answer="${2:-y}"  # Default to 'y' if not specified
+  
+  if [[ "$NONINTERACTIVE" == "true" ]]; then
+    echo "     ℹ️ Running in noninteractive mode - automatically answering '${default_answer}'"
+    REPLY="${default_answer}"
+    return 0
+  else
+    echo "$prompt_text"
+    read -p "       " -n 1 -r
+    echo
+    return 0
+  fi
+}
 
 # Resolve directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

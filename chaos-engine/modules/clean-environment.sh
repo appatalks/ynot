@@ -1,13 +1,36 @@
 #!/usr/bin/env bash
 #
-# entropy can be reversed, but at what cost?
+# cleanse chaos to rebirth order anew
 #
 ####
 set -euo pipefail
 
 # modules/clean-environment.sh
-# Loads config from config.env and cleans up a GitHub Enterprise Server environment
-# Keeping only the license and admin user
+# Loads config from config.env and resets a GitHub Enterprise instance
+
+# Check for noninteractive mode
+NONINTERACTIVE=false
+if [[ $# -gt 0 && "${1:-}" == "--noninteractive" ]]; then
+  NONINTERACTIVE=true
+  echo "Running in noninteractive mode - will not prompt for confirmation"
+fi
+
+# Function to handle user prompts in noninteractive mode
+prompt_user() {
+  local prompt_text="$1"
+  local default_answer="${2:-y}"  # Default to 'y' if not specified
+  
+  if [[ "$NONINTERACTIVE" == "true" ]]; then
+    echo "     ℹ️ Running in noninteractive mode - automatically answering '${default_answer}'"
+    REPLY="${default_answer}"
+    return 0
+  else
+    echo "$prompt_text"
+    read -p "       " -n 1 -r
+    echo
+    return 0
+  fi
+}
 
 # Resolve directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,16 +81,21 @@ else
 fi
 
 # Ask for confirmation before proceeding
-echo -e "\n⚠️  WARNING: This will delete ALL organizations, repositories, users, and other data"
-echo "from this GitHub Enterprise Server instance, except for:"
-echo "  • The license"
-echo "  • The authenticated admin user account"
-echo -e "\nThis operation is DESTRUCTIVE and CANNOT BE UNDONE."
-read -p "Type 'CONFIRM-CLEANUP' to proceed: " CONFIRMATION
+if [[ "$NONINTERACTIVE" == "false" ]]; then
+  echo -e "\n⚠️  WARNING: This will delete ALL organizations, repositories, users, and other data"
+  echo "from this GitHub Enterprise Server instance, except for:"
+  echo "  • The license"
+  echo "  • The authenticated admin user account"
+  echo -e "\nThis operation is DESTRUCTIVE and CANNOT BE UNDONE."
+  read -p "Type 'CONFIRM-CLEANUP' to proceed: " CONFIRMATION
 
-if [[ "$CONFIRMATION" != "CONFIRM-CLEANUP" ]]; then
-  echo "Cleanup aborted."
-  exit 1
+  if [[ "$CONFIRMATION" != "CONFIRM-CLEANUP" ]]; then
+    echo "Cleanup aborted."
+    exit 1
+  fi
+else
+  # Noninteractive mode - automatically confirm
+  CONFIRMATION="CONFIRM-CLEANUP"
 fi
 
 echo -e "\n🧹 Starting GitHub Enterprise Server cleanup...\n"
