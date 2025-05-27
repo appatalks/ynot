@@ -317,6 +317,16 @@ top_repos_with_large_files=$(mktemp)
 # Get the repos with the largest files and most files combined from both report files
 awk -F: '{print $1}' "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | sort | uniq -c | sort -nr | head -n "$MAX_REPOS" | awk '{print $2}' > "$top_repos_with_large_files"
 
+# Create a mapping of short paths to full paths
+short_to_full_path_map=$(mktemp)
+echo "Building repository path mappings..."
+for repo in "${repos_to_analyze[@]}"; do
+    short_path=$(basename "$repo" .git)
+    short_nested_path=$(echo "$repo" | sed "s|$REPO_BASE/||g")
+    echo "$short_path $repo" >> "$short_to_full_path_map"
+    echo "$short_nested_path $repo" >> "$short_to_full_path_map"
+done
+
 echo "Resolving friendly names for top $MAX_REPOS repositories with large files..."
 resolved_count=0
 
@@ -335,20 +345,31 @@ if command -v ghe-nwo &> /dev/null; then
             # Try direct path construction first (faster)
             actual_path="$REPO_BASE/$repo_path.git"
         else
-            # Try to find the actual repo path in our list (slower but more accurate)
-            for repo in "${repos_to_analyze[@]}"; do
-                if [[ "$(echo "$repo" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')" == "$repo_path" ]]; then
-                    actual_path="$repo"
-                    break
-                fi
-            done
+            # Look for repo path in our pre-computed mapping
+            matching_path=$(grep -m1 "^${repo_path} " "$short_to_full_path_map" | cut -d' ' -f2)
+            if [[ -n "$matching_path" ]]; then
+                actual_path="$matching_path"
+            else
+                # Try to find the actual repo path in our list (slower but more accurate)
+                for repo in "${repos_to_analyze[@]}"; do
+                    # Compare with different path formats
+                    repo_relative=$(echo "$repo" | sed "s|$REPO_BASE/||g")
+                    repo_basename=$(basename "$repo" .git)
+                    
+                    if [[ "$repo_relative" == "$repo_path" || "$repo_basename" == "$repo_path" || 
+                          "$repo_path" == *"$(basename "$repo_relative")"* ]]; then
+                        actual_path="$repo"
+                        break
+                    fi
+                done
+            fi
         fi
         
         if [[ -n "$actual_path" ]]; then
             friendly_name=$(ghe-nwo "$actual_path" 2>/dev/null)
             
             if [[ -n "$friendly_name" ]]; then
-                # Store in cache - with multiple variants of the path
+                # Store in cache with multiple variants of the path
                 repo_name_cache["$repo_path"]="$friendly_name"
                 repo_name_cache["$actual_path"]="$friendly_name"
                 
@@ -356,10 +377,14 @@ if command -v ghe-nwo &> /dev/null; then
                 repo_path_no_git=$(echo "$repo_path" | sed 's|\.git$||g')
                 repo_name_cache["$repo_path_no_git"]="$friendly_name"
                 
+                # Store basename versions for nested path lookups
+                basename_path=$(basename "$repo_path")
+                repo_name_cache["$basename_path"]="$friendly_name"
+                
                 # Debug output for cache entries
                 if [[ "$DEBUG" == "true" ]]; then
                     echo "DEBUG: Resolved $repo_path to $friendly_name"
-                    echo "DEBUG: Added cache entries for: $repo_path, $actual_path, $repo_path_no_git"
+                    echo "DEBUG: Added cache entries for: $repo_path, $actual_path, $repo_path_no_git, $basename_path"
                 fi
                 
                 ((resolved_count++))
@@ -416,32 +441,63 @@ if (( over_max_repos > 0 )); then
     while read -r count repo; do
         # Look up the friendly name from the cache if available
         display_name="$repo"
+        found_in_cache=false
         
-        # Try to find the repo in the cache - checking multiple possible formats
+        # Function to check if a path contains the repo or vice versa
+        path_matches() {
+            local key="$1"
+            local r="$2"
+            # Remove common path prefixes for comparison
+            local clean_key=$(echo "$key" | sed 's|^/data/user/repositories/||' | sed 's|\.git$||')
+            local clean_repo=$(echo "$r" | sed 's|^/data/user/repositories/||' | sed 's|\.git$||')
+            
+            # Check various matching conditions
+            [[ "$clean_key" == "$clean_repo" ]] || 
+            [[ "$clean_key" == *"$clean_repo"* ]] || 
+            [[ "$clean_repo" == *"$clean_key"* ]] || 
+            [[ "$(basename "$clean_key")" == "$(basename "$clean_repo")" ]]
+        }
+        
+        # Try to find the repo in the cache with different matching strategies
         if [[ -n "${repo_name_cache[$repo]}" ]]; then
             display_name="${repo_name_cache[$repo]}"
-            echo "Found in cache directly: $repo -> $display_name"
+            found_in_cache=true
+            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found in cache directly: $repo -> $display_name"
         elif [[ -n "${repo_name_cache[$REPO_BASE/$repo.git]}" ]]; then
             display_name="${repo_name_cache[$REPO_BASE/$repo.git]}"
-            echo "Found with full path: $repo -> $display_name"
+            found_in_cache=true
+            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found with full path: $repo -> $display_name"
+        elif [[ -n "${repo_name_cache[$(basename "$repo")]}" ]]; then
+            display_name="${repo_name_cache[$(basename "$repo")]}"
+            found_in_cache=true
+            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found by basename: $repo -> $display_name"
         else
             # Try all cache keys as a last resort
             for key in "${!repo_name_cache[@]}"; do
-                # Check if the key ends with our repo path
-                if [[ "$key" == *"$repo"* ]]; then
+                if path_matches "$key" "$repo"; then
                     display_name="${repo_name_cache[$key]}"
-                    echo "Found with partial match: $repo in $key -> $display_name"
+                    found_in_cache=true
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found with path matching: $repo ~ $key -> $display_name"
                     break
                 fi
             done
         fi
         
-        echo "  $display_name: $count large files"
+        if [[ "$found_in_cache" == "true" ]]; then
+            echo "  $display_name: $count large files"
+        else
+            # Fallback display with note that it wasn't resolved
+            echo "  $display_name: $count large files (unresolved path)"
+            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Could not resolve repository name for: $repo"
+        fi
     done < "$top_repos_counted"
     
     rm -f "$top_repos_counted"
     echo ""
 fi
+
+# Clean up the short to full path map if it exists
+[[ -f "$short_to_full_path_map" ]] && rm -f "$short_to_full_path_map"
 
 echo "REPORTS LOCATION:"
 echo "---------------"
