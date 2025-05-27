@@ -21,16 +21,34 @@ while [[ $# -gt 0 ]]; do
         --base-path) REPO_BASE=$2; shift 2 ;;
         --help) 
             echo "Simplified Repository File Size Analysis for GHES"
+            echo "Usage: bash <(curl -sL URL) [options]"
             echo "Environment variables: SIZE_MIN_MB, SIZE_MAX_MB, MAX_REPOS, MAX_OBJECTS, INCLUDE_DELETED, REPO_BASE"
+            echo "Note: May require sudo for access to repository files in $REPO_BASE"
             exit 0 ;;
         *) shift ;;
     esac
 done
 
-# Validate repository base path
-if [[ ! -d "$REPO_BASE" ]]; then
-    echo "Error: Repository base path not found: $REPO_BASE"
-    echo "Set REPO_BASE environment variable to the correct path"
+# Function to check if we can access repository directory
+check_repo_access() {
+    if [[ ! -d "$REPO_BASE" ]]; then
+        echo "Error: Repository base path not found: $REPO_BASE"
+        echo "Set REPO_BASE environment variable to the correct path"
+        return 1
+    fi
+    
+    # Test if we can read the repository directory
+    if ! ls "$REPO_BASE" >/dev/null 2>&1; then
+        echo "Warning: Cannot access $REPO_BASE - you may need to run with sudo"
+        echo "Try: sudo MAX_REPOS=$MAX_REPOS SIZE_MIN_MB=$SIZE_MIN_MB SIZE_MAX_MB=$SIZE_MAX_MB bash <(curl -sL URL)"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Check repository access
+if ! check_repo_access; then
     exit 1
 fi
 

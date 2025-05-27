@@ -290,11 +290,14 @@ sudo bash simple-repo-analysis.sh --include-deleted
 **One-liner from GitHub:**
 
 ```sh
-# Default analysis (1MB-25MB files)
-sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+# Default analysis (1MB-25MB files) - try without sudo first
+SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+
+# If you get permission errors, use sudo
+SIZE_MIN_MB=1 SIZE_MAX_MB=25 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
 
 # Custom thresholds using environment variables
-SIZE_MIN_MB=10 SIZE_MAX_MB=50 MAX_REPOS=200 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+SIZE_MIN_MB=10 SIZE_MAX_MB=50 MAX_REPOS=200 bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
 ```
 
 **Environment Variables:**
