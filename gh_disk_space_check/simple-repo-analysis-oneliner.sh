@@ -21,18 +21,11 @@ while [[ $# -gt 0 ]]; do
         --base-path) REPO_BASE=$2; shift 2 ;;
         --help) 
             echo "Simplified Repository File Size Analysis for GHES"
-            echo "Usage: sudo bash <(curl -sL URL) [options]"
             echo "Environment variables: SIZE_MIN_MB, SIZE_MAX_MB, MAX_REPOS, MAX_OBJECTS, INCLUDE_DELETED, REPO_BASE"
             exit 0 ;;
         *) shift ;;
     esac
 done
-
-# Check if running as root
-if [[ $EUID -ne 0 ]]; then
-    echo "Error: This script must be run as root (use sudo)"
-    exit 1
-fi
 
 # Validate repository base path
 if [[ ! -d "$REPO_BASE" ]]; then

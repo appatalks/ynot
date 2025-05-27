@@ -1,9 +1,4 @@
 #!/bin/bash
-# Save as /tmp/repo-filesize-analysis.sh
-# Run with: 'sudo bash /tmp/repo-size-analysis.sh'
-#
-# Performance-optimized version - May 2025
-# Reduces disk I/O and improves repository scanning speed
 
 # Show help function
 show_help() {
@@ -255,9 +250,6 @@ sudo chmod 666 ${over_max_file}.tmp ${between_file}.tmp
 USE_PARALLEL_FINAL=$USE_PARALLEL
 if [ "$USE_PARALLEL" = true ]; then
     if ! command -v parallel &>/dev/null; then
-        echo "WARNING: GNU Parallel not found. Parallel processing disabled."
-        echo "Install with: sudo apt-get install parallel"
-        echo "On GitHub Enterprise Server, run: sudo apt-get update && sudo apt-get install -y parallel"
         USE_PARALLEL_FINAL=false
     else
         # Make sure parallel version is compatible
