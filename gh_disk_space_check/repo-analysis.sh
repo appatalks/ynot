@@ -605,6 +605,55 @@ fi
 # Clean up the short to full path map if it exists
 [[ -f "$short_to_full_path_map" ]] && rm -f "$short_to_full_path_map"
 
+# Pre-process repository names from output files for more efficient resolution
+echo "Pre-processing repository paths from output files..."
+all_repo_paths=$(awk -F: '{print $1}' "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | sort -u)
+repo_count=$(echo "$all_repo_paths" | wc -l)
+echo "Found $repo_count unique repositories to resolve"
+
+if [[ "$DEBUG" == "true" ]]; then
+    echo "DEBUG: Repositories that need resolution:"
+    for repo_path in $all_repo_paths; do
+        echo "  $repo_path"
+    done
+fi
+
+# Resolve all repository names first to populate the cache more thoroughly
+for repo_path in $all_repo_paths; do
+    # Skip if we already have this in the cache
+    if [[ -n "${repo_name_cache[$repo_path]}" ]]; then
+        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Already in cache: $repo_path -> ${repo_name_cache[$repo_path]}"
+        continue
+    fi
+    
+    # Skip non-nested paths (they're typically already resolved)
+    if [[ ! "$repo_path" =~ [a-z0-9]/nw/ ]]; then
+        continue
+    fi
+    
+    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Pre-resolving repository path: $repo_path"
+    
+    # Try to find the repository and resolve its name
+    possible_repo=$(sudo find "$REPO_BASE" -path "*$repo_path*" -type d -name "*.git" -print -quit 2>/dev/null)
+    if [[ -n "$possible_repo" ]]; then
+        friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
+        if [[ -n "$friendly_name" ]]; then
+            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Pre-resolved: $repo_path -> $friendly_name"
+            # Store in cache with multiple variants of the path
+            repo_name_cache["$repo_path"]="$friendly_name"
+            repo_name_cache["$possible_repo"]="$friendly_name"
+            
+            # Store without .git suffix for report lookup
+            repo_path_no_git=$(echo "$repo_path" | sed 's|\.git$||g')
+            repo_name_cache["$repo_path_no_git"]="$friendly_name"
+            
+            # Store basename versions for nested path lookups
+            basename_path=$(basename "$repo_path")
+            repo_name_cache["$basename_path"]="$friendly_name"
+        fi
+    fi
+done
+
 # Update the output files to use friendly names
 echo "Updating output files with friendly repository names..."
 update_output_file() {
@@ -664,14 +713,14 @@ update_output_file() {
                 if [[ "$found_in_cache" == "false" && "$repo_path" =~ [a-z0-9]/nw/ ]]; then
                     [[ "$DEBUG" == "true" ]] && echo "DEBUG: Searching for repository ID in files: $repo_path"
                     # Look for files that might contain this repository ID
-                    repo_file_match=$(grep -l "$repo_path" "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | head -1)
+                    repo_file_match=$(grep -l "^$repo_path:" "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | head -1)
                     if [[ -n "$repo_file_match" ]]; then
                         # Extract the pack file path from the repo file
-                        pack_path=$(grep "$repo_path:" "$repo_file_match" | head -1)
+                        pack_path=$(grep "^$repo_path:" "$repo_file_match" | head -1)
                         if [[ -n "$pack_path" ]]; then
                             [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found pack path: $pack_path"
                             # Try to find the full repository containing this pack file
-                            possible_repo=$(sudo find "$REPO_BASE" -path "*$repo_path*" -type d -name "*.git" 2>/dev/null | head -1)
+                            possible_repo=$(sudo find "$REPO_BASE" -path "*$repo_path*" -type d -name "*.git" -print -quit 2>/dev/null)
                             if [[ -n "$possible_repo" ]]; then
                                 friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
                                 if [[ -n "$friendly_name" ]]; then
@@ -694,11 +743,15 @@ update_output_file() {
                 if [[ -n "$possible_repo" ]]; then
                     friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
                     if [[ -n "$friendly_name" ]]; then
-                        friendly_name="$friendly_name"
                         found_in_cache=true
                         [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolved on demand: $repo_path -> $friendly_name"
-                        # Add to cache for future use
+                        # Add to cache for multiple variations of the path
                         repo_name_cache["$repo_path"]="$friendly_name"
+                        repo_name_cache["$possible_repo"]="$friendly_name"
+                        repo_path_no_git=$(echo "$repo_path" | sed 's|\.git$||g')
+                        repo_name_cache["$repo_path_no_git"]="$friendly_name"
+                        basename_path=$(basename "$repo_path")
+                        repo_name_cache["$basename_path"]="$friendly_name"
                     fi
                 fi
             fi
