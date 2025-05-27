@@ -74,90 +74,10 @@ get_repo_name() {
     echo "$repo_name"
 }
 
-# Function to batch resolve repository names using ghe-nwo
+# We no longer need this function as we're doing name resolution directly
+# Function left empty for compatibility with any existing calls
 batch_resolve_repo_names() {
-    echo "Resolving repository names for reporting..."
-    # Create a temporary file with repo paths
-    local repo_paths_file=$(mktemp)
-    local resolved_names_file=$(mktemp)
-
-    # Extract unique repository paths from result files
-    awk -F: '{print $1}' "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | sort -u > "$repo_paths_file"
-    
-    # Get repo count
-    local repo_count=$(wc -l < "$repo_paths_file")
-    if [[ "$repo_count" -eq 0 ]]; then
-        rm -f "$repo_paths_file" "$resolved_names_file"
-        return
-    fi
-    
-    echo "Resolving names for $repo_count repositories with large files..."
-    
-    # Check if ghe-nwo is available
-    if command -v ghe-nwo &> /dev/null; then
-        # Create a loop to process batches of repositories
-        local batch_size=20
-        local total_processed=0
-        
-        while read -r repo_path; do
-            # Try to get actual path for the repository
-            local actual_path
-            if [[ -d "$repo_path" ]]; then
-                actual_path="$repo_path"
-            else
-                # Try to find the actual repo path in our list
-                for repo in "${repos_to_analyze[@]}"; do
-                    if [[ "$(echo "$repo" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')" == "$repo_path" ]]; then
-                        actual_path="$repo"
-                        break
-                    fi
-                done
-            fi
-            
-            if [[ -n "$actual_path" ]]; then
-                echo "$actual_path" >> "$resolved_names_file"
-                ((total_processed++))
-                
-                # Process in batches to avoid overloading
-                if (( total_processed % batch_size == 0 )) || (( total_processed == repo_count )); then
-                    # Call ghe-nwo with all paths at once
-                    if [[ "$DEBUG" == "true" ]]; then
-                        echo "DEBUG: Resolving batch of repository names..."
-                    fi
-                    
-                    while read -r path; do
-                        local friendly_name
-                        friendly_name=$(ghe-nwo "$path" 2>/dev/null)
-                        
-                        if [[ -z "$friendly_name" ]]; then
-                            # Fallback to path extraction
-                            friendly_name=$(echo "$path" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
-                        fi
-                        
-                        # Store in cache
-                        repo_name_cache["$path"]="$friendly_name"
-                        
-                        # Also cache for path-based lookups
-                        path_only=$(echo "$path" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
-                        repo_name_cache["$path_only"]="$friendly_name"
-                        
-                    done < "$resolved_names_file"
-                    
-                    # Clear the file for next batch
-                    > "$resolved_names_file"
-                fi
-            fi
-        done < "$repo_paths_file"
-    else
-        # If ghe-nwo not available, use path-based extraction for all
-        while read -r repo_path; do
-            repo_name_cache["$repo_path"]=$(echo "$repo_path" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
-        done < "$repo_paths_file"
-    fi
-    
-    rm -f "$repo_paths_file" "$resolved_names_file"
-    
-    echo "Repository name resolution completed."
+    : # Do nothing
 }
 
 # Function to process a single repository
@@ -379,9 +299,48 @@ else
     echo "No repositories available for detailed analysis."
 fi
 
-# Before generating the final report, batch resolve all repository names
-# to ensure we have proper organization/repo format names in the report
-batch_resolve_repo_names
+# Before generating the final report, find the most important repositories to resolve
+echo "Identifying repositories for name resolution..."
+top_repos_with_large_files=$(mktemp)
+
+# Get the repos with the largest files and most files combined from both report files
+awk -F: '{print $1}' "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | sort | uniq -c | sort -nr | head -n "$MAX_REPOS" | awk '{print $2}' > "$top_repos_with_large_files"
+
+# Cache the human-readable names for the top repositories
+echo "Resolving names for up to $MAX_REPOS repositories with large files..."
+if command -v ghe-nwo &> /dev/null; then
+    while read -r repo_path; do
+        # Find the actual repository path if needed
+        actual_path=""
+        if [[ -d "$repo_path" ]]; then
+            actual_path="$repo_path"
+        else
+            # Try to find the actual repo path in our list
+            for repo in "${repos_to_analyze[@]}"; do
+                if [[ "$(echo "$repo" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')" == "$repo_path" ]]; then
+                    actual_path="$repo"
+                    break
+                fi
+            done
+        fi
+        
+        if [[ -n "$actual_path" ]]; then
+            friendly_name=$(ghe-nwo "$actual_path" 2>/dev/null)
+            
+            if [[ -n "$friendly_name" ]]; then
+                # Store in cache
+                repo_name_cache["$repo_path"]="$friendly_name"
+                repo_name_cache["$actual_path"]="$friendly_name"
+                
+                if [[ "$DEBUG" == "true" ]]; then
+                    echo "DEBUG: Resolved $repo_path to $friendly_name"
+                fi
+            fi
+        fi
+    done < "$top_repos_with_large_files"
+fi
+
+rm -f "$top_repos_with_large_files"
 
 # Generate summary report
 echo ""
