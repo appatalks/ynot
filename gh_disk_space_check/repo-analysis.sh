@@ -5,7 +5,7 @@
 # Default configuration - can be overridden by environment variables
 SIZE_MIN_MB=${SIZE_MIN_MB:-1}
 SIZE_MAX_MB=${SIZE_MAX_MB:-25}
-MAX_REPOS=${MAX_REPOS:-100}
+MAX_REPOS=${MAX_REPOS:-10}
 MAX_OBJECTS=${MAX_OBJECTS:-10}
 INCLUDE_DELETED=${INCLUDE_DELETED:-false}
 REPO_BASE=${REPO_BASE:-"/data/user/repositories"}
