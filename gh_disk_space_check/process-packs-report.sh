@@ -460,8 +460,6 @@ cat "$INPUT_FILE" | while read -r line; do
         # In test mode, skip actual sudo operations
         if [ -n "$TEST_MODE" ]; then
             echo "TEST MODE: Skipping sudo operations for directory existence checks" >&2
-        el        if [ -n "$TEST_MODE" ]; then
-            echo "TEST MODE: Skipping sudo operations for directory existence checks" >&2
         elif ! sudo test -d "$repo_path"; then
             if [[ "$VERBOSE" -eq 1 ]]; then
                 echo "DEBUG: Repository path does not exist: $repo_path"
