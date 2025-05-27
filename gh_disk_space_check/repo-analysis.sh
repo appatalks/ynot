@@ -31,29 +31,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to check if we can access repository directory
-check_repo_access() {
-    if [[ ! -d "$REPO_BASE" ]]; then
-        echo "Error: Repository base path not found: $REPO_BASE"
-        echo "Set REPO_BASE environment variable to the correct path"
-        return 1
-    fi
-    
-    # Test if we can read the repository directory with sudo
-    if ! sudo ls "$REPO_BASE" >/dev/null 2>&1; then
-        echo "Error: Cannot access $REPO_BASE even with sudo"
-        echo "Please check that the path exists and you have permission to use sudo"
-        return 1
-    fi
-    
-    return 0
-}
-
-# Check repository access
-if ! check_repo_access; then
-    exit 1
-fi
-
 # Convert sizes to bytes for calculations
 SIZE_MIN_BYTES=$((SIZE_MIN_MB * 1024 * 1024))
 SIZE_MAX_BYTES=$((SIZE_MAX_MB * 1024 * 1024))
