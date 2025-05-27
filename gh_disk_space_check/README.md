@@ -30,6 +30,16 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 - Advanced path handling for all GitHub Enterprise Server path formats (May 2025 update).
 - Supports decimal sizes and special path formats in input files.
 
+### simple-repo-analysis.sh ⭐ NEW SIMPLIFIED VERSION
+- **66% smaller** than the original repo-filesize-analysis.sh (305 vs 913 lines)
+- Clean, maintainable code with the same reporting functionality
+- Single self-contained script with no external dependencies
+- Handles both standard and `/nw/` compressed repository paths
+- Built-in `ghe-nwo` integration for friendly repository names
+- Configurable via command line options or environment variables
+- Provides identical output format to the original complex script
+- Easy to understand and modify for specific needs
+
 ## Getting Started
 
 ### One-Liner to Run the Script
@@ -247,4 +257,105 @@ Benefits of batch mode:
 - Improves performance when analyzing multiple pack files from the same repository
 
 These optimization features are automatically leveraged by the `process-packs-report.sh` script when appropriate.
+
+## Simplified Repository Analysis (NEW)
+
+### simple-repo-analysis.sh
+
+The simplified version provides the same core functionality as the original `repo-filesize-analysis.sh` but with a much cleaner, more maintainable codebase.
+
+**Key Benefits:**
+- **66% smaller codebase** (305 vs 913 lines)
+- Single self-contained script with no external dependencies
+- Easy to understand and modify
+- Same output format and reporting functionality
+- Better error handling and validation
+
+**Basic Usage:**
+
+```sh
+# Run with default settings (1MB-25MB range)
+sudo bash simple-repo-analysis.sh
+
+# Custom size thresholds
+sudo bash simple-repo-analysis.sh --min-size 5 --max-size 100
+
+# Analyze more repositories
+sudo bash simple-repo-analysis.sh --max-repos 200
+
+# Include deleted repositories
+sudo bash simple-repo-analysis.sh --include-deleted
+```
+
+**One-liner from GitHub:**
+
+```sh
+# Default analysis (1MB-25MB files)
+sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+
+# Custom thresholds using environment variables
+SIZE_MIN_MB=10 SIZE_MAX_MB=50 MAX_REPOS=200 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+```
+
+**Environment Variables:**
+
+```sh
+SIZE_MIN_MB=1          # Minimum file size in MB
+SIZE_MAX_MB=25         # Maximum file size in MB  
+MAX_REPOS=100          # Max repositories to analyze
+MAX_OBJECTS=10         # Max objects per repository
+INCLUDE_DELETED=false  # Include deleted repositories
+REPO_BASE="/data/user/repositories"  # Repository base path
+```
+
+**Sample Output:**
+
+```
+ANALYSIS SETTINGS:
+- Minimum file size: 1MB
+- Maximum file size: 25MB
+- Max repositories to analyze in detail: 100
+- Max objects per repository: 10
+- Include deleted repositories: false
+
+Analyzing repositories in /data/user/repositories...
+Initial estimate: 317M	/data/user/repositories/
+Scanning for repositories...
+Found 122 active repositories after filtering
+Performing initial size scan to identify largest repositories...
+Total repository storage: .30 GB across 122 repositories
+Starting repository analysis...
+[1/5] Checking github/dependabot-action...
+[2/5] Checking actions/labeler...
+[3/5] Checking org-a/chaos-repo-1748297529-2...
+[4/5] Checking actions/stale...
+[5/5] Checking actions/setup-python...
+
+======================================
+REPOSITORY FILE SIZE ANALYSIS SUMMARY
+======================================
+Total repositories found: 122
+
+FINDINGS SUMMARY:
+----------------
+1. Repositories with files > 25MB: 2
+   Total files > 25MB: 2
+
+2. Repositories with files 1MB-25MB: 18
+   Total files 1MB-25MB: 19
+
+TOP 5 REPOSITORIES WITH LARGEST FILES:
+------------------------------------
+  github/codeql-action: 1 large files
+  actions/labeler: 1 large files
+
+REPORTS LOCATION:
+---------------
+* Files over 25MB: /tmp/repos_over_25mb.txt
+* Files between 1MB-25MB: /tmp/repos_1mb_to_25mb.txt
+
+Analysis completed: Tue 27 May 2025 03:07:39 AM UTC
+```
+
+The simplified version maintains all the key features while being much easier to understand and maintain.
 
