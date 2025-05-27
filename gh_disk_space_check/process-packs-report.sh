@@ -117,9 +117,33 @@ while IFS= read -r line; do
     repo_name=$(echo "$line" | cut -d':' -f1 | xargs)
     file_info=$(echo "$line" | cut -d':' -f2- | xargs)
     
+    # Check for special case where the repository path is in file_info rather than repo_name
+    # This happens with compressed repository paths in format:
+    # github/codeql-action:/data/user/repositories/6/nw/6f/49/22/18/18.git/objects/pack/...
+    if [[ "$file_info" == "/data/user/repositories/"*"/nw/"*"/objects/pack/"* ]]; then
+        # Extract the repository path from file_info
+        if [[ "$file_info" =~ (/data/user/repositories/[^/]+/nw/[^/]+/[^/]+/[^/]+/[^/]+/[^/]+\.git) ]]; then
+            actual_repo_path=${BASH_REMATCH[1]}
+            # Store the original repo_name in case we need it later
+            original_repo_name="$repo_name"
+            # Set the repo_name to the actual repository path for counting and size tracking
+            repo_name="$actual_repo_path"
+            # Update file_info to contain only the objects/pack part
+            file_info="${file_info#*$actual_repo_path/}"
+            if [[ "$VERBOSE" -eq 1 ]]; then
+                echo "Initial analysis - Repository path found in file_info: $actual_repo_path"
+                echo "Updated repo_name: $repo_name"
+                echo "Updated file_info: $file_info"
+            fi
+        fi
+    fi
+    
     # Extract size if available
-    if [[ "$file_info" =~ \(([0-9]+)[[:space:]]*[A-Za-z]+\) ]]; then
-        size=${BASH_REMATCH[1]}
+    if [[ "$file_info" =~ \(([0-9.]+)[[:space:]]*[A-Za-z]+\) ]]; then
+        # Convert to an integer for calculations (assuming MB)
+        size_str=${BASH_REMATCH[1]}
+        # Handle decimal values by removing the decimal point if present
+        size=${size_str%.*}
         
         # Add to the repository's total size
         current_size=${repo_sizes[$repo_name]:-0}
