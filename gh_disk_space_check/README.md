@@ -14,30 +14,17 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 - Reports the largest files and the largest files older than 30 days.
 - Excludes some directories from scans, ie. (`/proc` and `/data/user/docker/overlay2`).
 
-### repo-filesize-analysis.sh
+### repo-analysis.sh
 - Analyzes Git repositories in `/data/user/repositories` for large files.
 - Reports repositories with files exceeding configurable size thresholds.
 - Generates detailed reports of large files in plain text format.
-- Can automatically resolve Git object hashes to actual filenames.
 - Integrates with GitHub Enterprise Server's `ghe-nwo` command to display proper repository names.
 - Supports compressed repository paths with `/nw/` format (May 2025 update).
-
-### process-packs-report.sh
-- Processes repository analysis output files to resolve Git pack file contents.
-- Handles both standard and compressed (`/nw/` format) repository paths.
-- Identifies and extracts large objects from pack files.
-- Intelligently prioritizes repositories based on size for efficient processing.
-- Advanced path handling for all GitHub Enterprise Server path formats (May 2025 update).
-- Supports decimal sizes and special path formats in input files.
-
-### simple-repo-analysis.sh ⭐ NEW SIMPLIFIED VERSION
-- **66% smaller** than the original repo-filesize-analysis.sh (305 vs 913 lines)
-- Clean, maintainable code with the same reporting functionality
-- Single self-contained script with no external dependencies
-- Handles both standard and `/nw/` compressed repository paths
-- Built-in `ghe-nwo` integration for friendly repository names
+- Shows friendly repository names in both summary report and output files.
+- Efficient single-script solution for repository file analysis
+- Clean, maintainable code with comprehensive reporting
+- No external dependencies or additional script requirements
 - Configurable via command line options or environment variables
-- Provides identical output format to the original complex script
 - Easy to understand and modify for specific needs
 
 ## Getting Started
@@ -91,233 +78,112 @@ This project is licensed under the [GPL-3.0 license]().
 
 ## Repository Analysis Tools
 
-### repo-filesize-analysis.sh
+### repo-analysis.sh
 
 Analyze Git repositories for large files:
 
 ```sh
-# Run with default thresholds (100MB min, 400MB max)
-sudo bash repo-filesize-analysis.sh
+# Run with default thresholds (1MB min, 25MB max)
+sudo bash repo-analysis.sh
 
 # Run with custom thresholds
-SIZE_MIN_MB=25 SIZE_MAX_MB=100 sudo bash repo-filesize-analysis.sh
+SIZE_MIN_MB=10 SIZE_MAX_MB=50 sudo bash repo-analysis.sh
 
-# Run with automatic object resolution
-SIZE_MIN_MB=25 SIZE_MAX_MB=100 RESOLVE_OBJECTS=true sudo bash repo-filesize-analysis.sh
+# Include deleted repositories
+INCLUDE_DELETED=true sudo bash repo-analysis.sh
 ```
 
 Run directly from GitHub (one-liner):
 
 ```sh
 # Run with default thresholds
-sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
+sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-analysis.sh)
 
-# Run with custom thresholds and object resolution
-SIZE_MIN_MB=1 SIZE_MAX_MB=25 RESOLVE_OBJECTS=true sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
+# Run with custom thresholds
+SIZE_MIN_MB=5 SIZE_MAX_MB=100 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-analysis.sh)
 
-# Run with parallel processing and 8 jobs (requires GNU parallel)
-PARALLEL_JOBS=8 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
-
-# Disable parallel processing
-USE_PARALLEL=false sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-filesize-analysis.sh)
+# Run with debug mode enabled
+DEBUG=true sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/repo-analysis.sh)
 ```
 
-### resolve-pack-objects.sh
+### Command-Line Options
 
-This tool helps you resolve Git pack objects to real filenames:
+The repo-analysis.sh script supports the following command-line options:
 
 ```sh
-./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git
+--min-size VALUE    Set minimum file size in MB (default: 1)
+--max-size VALUE    Set maximum file size in MB (default: 25)
+--max-repos VALUE   Set maximum repositories to analyze (default: 10)
+--max-objects VALUE Set maximum objects per repository (default: 10)
+--include-deleted   Include deleted repositories in analysis
+--base-path PATH    Set custom repository base path
+--debug             Enable debug output
+--help              Show help information
 ```
 
-### process-packs-report.sh
-
-Process the output of repo-filesize-analysis.sh to get detailed information about each pack file:
-
+Example:
 ```sh
-./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt
-
-# Enable verbose mode to show path corrections
-./process-packs-report.sh -f /tmp/repos_100mb_to_400mb.txt -v
+sudo bash repo-analysis.sh --min-size 2 --max-size 10 --max-repos 20 --include-deleted
 ```
-
-When you enable object resolution with `RESOLVE_OBJECTS=true`, the script will:
-
-1. First try to find the helper scripts in the same directory
-2. If not found, automatically download them from GitHub
-3. Generate detailed reports showing which actual files exist within the Git pack files
-4. Attempt to handle different repository path formats and permission issues
-
-This helps you identify specific large files within each repository, rather than just seeing the pack file names.
 
 ### Important Notes on Permissions and Repository Paths
 
-1. **Run with sudo**: These scripts need to access Git repositories that may have restricted permissions, so they should be run with `sudo`.
+1. **Run with sudo**: This script needs to access Git repositories that may have restricted permissions, so it should be run with `sudo`.
    
-2. **Repository Path Formats**: The scripts handle multiple repository path formats:
-   - `org/repo`: Standard organization/repository format
-   - Directory paths: Direct filesystem paths like `/data/user/repositories/org/repo.git`
+2. **Repository Path Formats**: The script handles multiple repository path formats:
+   - Standard organization/repository format (resolved via ghe-nwo)
+   - Direct filesystem paths like `/data/user/repositories/org/repo.git`
+   - Compressed nested path format like `c/nw/c7/4d/97/16/16` used by GitHub Enterprise Server
    
-3. **Repository Resolution**: If repositories can't be found, the scripts will:
+3. **Repository Resolution**: If repositories can't be found, the script will:
    - Try multiple potential locations (with/without .git suffix)
-   - Search for similar repositories and show alternatives
-   - Show available pack files in found repositories
-   
-4. **Unresolved Pack Files**: For pack files that can't be fully resolved, the script will:
-   - Show basic information about object size
-   - Mark objects as [unresolved], [detached], or [unknown] depending on what was found
-   - Show instructions for further investigation
+   - Attempt pattern matching to find repository paths
+   - Fall back to using the internal path when resolution fails
 
-5. **Path Correction**: The scripts automatically fix duplicated repository base paths
-   - Resolves issues with paths like `/data/user/repositories//data/user/repositories/`
-   - Use the `-v` flag with `process-packs-report.sh` to see path corrections in real-time
+4. **Path Handling**: The script automatically handles:
+   - Path format detection for both standard and compressed paths
+   - Path normalization to correct representations
+   - Friendly name resolution via ghe-nwo
+   - Mapping between internal paths and friendly names
 
-## Performance Optimizations for Large Installations
+## Performance Optimizations
 
-The scripts include various optimizations for installations with large numbers of repositories:
+The repo-analysis.sh script includes optimizations for installations with large numbers of repositories:
 
-### Dynamic TOP_OBJECTS Adjustment
+### Environment Variables and Performance
 
-The system intelligently adjusts how many objects to analyze per repository based on:
-
-- **Repository Size**: Larger repositories are processed with stricter object limits
-  - >2GB repos: Only 2 objects analyzed
-  - >1GB repos: Only 3 objects analyzed
-  - >500MB repos: Only 5 objects analyzed
-  - The thresholds are adjusted automatically
-
-- **Repository Count**: When dealing with many repositories, the scripts automatically:
-  - Reduce the number of objects analyzed per repository
-  - Prioritize repositories with the largest objects
-  - Process only a subset of repositories if too many are found
-
-### Performance Control Parameters
-
-You can control the performance behavior with these environment variables:
+You can control the behavior of repo-analysis.sh with these environment variables:
 
 ```sh
-# To process more repositories in detail
-MAX_REPOS=100 sudo bash repo-filesize-analysis.sh
-
-# To analyze more objects per repository
-TOP_OBJECTS=20 sudo bash repo-filesize-analysis.sh
-
-# To disable automatic TOP_OBJECTS adjustment (not recommended for large installations)
-AUTO_ADJUST_TOP_OBJECTS=false sudo bash repo-filesize-analysis.sh
-```
-
-### Repository Prioritization
-
-The scripts automatically prioritize repositories:
-
-- Repositories are sorted by total size
-- The largest repositories are processed first
-- Small repositories with few large files are processed efficiently with appropriate settings
-
-This ensures that even on very large installations, you'll get useful results within a reasonable time frame.
-
-### Parallel Processing and Batch Mode
-
-For large installations with many repositories, the scripts support parallel processing and batch mode:
-
-#### Parallel Repository Scanning
-
-The `repo-filesize-analysis.sh` script can scan repositories in parallel, which can dramatically speed up analysis on large installations:
-
-```sh
-# Enable parallel processing with 8 jobs
-sudo bash repo-filesize-analysis.sh --parallel 8
-
-# Disable parallel processing
-sudo bash repo-filesize-analysis.sh --no-parallel
-```
-
-Requirements for parallel processing:
-- GNU Parallel must be installed (`sudo apt-get install parallel`)
-- On GitHub Enterprise Server: `sudo apt-get update && sudo apt-get install -y parallel`
-- Significantly reduces time needed to scan large numbers of repositories (up to 4-8x faster)
-- Automatically detects if GNU Parallel is available and falls back to sequential processing if not
-- Automatically creates a dynamic execution environment that works with one-liner curl execution
-
-#### Batch Mode for Object Resolution
-
-The `resolve-pack-objects.sh` script includes a batch mode that caches repository data:
-
-```sh
-# Enable batch mode (suitable for repositories with multiple pack files)
-./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git -b
-
-# Set a custom timeout for Git operations that might hang
-./resolve-pack-objects.sh -p /path/to/pack/file.pack -r /path/to/repository.git -b -T 60
-```
-
-Benefits of batch mode:
-- Caches repository data between multiple pack file analyses
-- Reuses Git operations to minimize redundant work
-- Improves performance when analyzing multiple pack files from the same repository
-
-These optimization features are automatically leveraged by the `process-packs-report.sh` script when appropriate.
-
-## Simplified Repository Analysis (NEW)
-
-### simple-repo-analysis.sh
-
-The simplified version provides the same core functionality as the original `repo-filesize-analysis.sh` but with a much cleaner, more maintainable codebase.
-
-**Key Benefits:**
-- **66% smaller codebase** (305 vs 913 lines)
-- Single self-contained script with no external dependencies
-- Easy to understand and modify
-- Same output format and reporting functionality
-- Better error handling and validation
-
-**Basic Usage:**
-
-```sh
-# Run with default settings (1MB-25MB range)
-sudo bash simple-repo-analysis.sh
-
-# Custom size thresholds
-sudo bash simple-repo-analysis.sh --min-size 5 --max-size 100
-
-# Analyze more repositories
-sudo bash simple-repo-analysis.sh --max-repos 200
-
-# Include deleted repositories
-sudo bash simple-repo-analysis.sh --include-deleted
-```
-
-**One-liner from GitHub:**
-
-```sh
-# Default analysis (1MB-25MB files) - try without sudo first
-SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
-
-# If you get permission errors, use sudo
-SIZE_MIN_MB=1 SIZE_MAX_MB=25 sudo bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
-
-# Custom thresholds using environment variables
-SIZE_MIN_MB=10 SIZE_MAX_MB=50 MAX_REPOS=200 bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
-```
-
-**Environment Variables:**
-
-```sh
+# Basic configuration
 SIZE_MIN_MB=1          # Minimum file size in MB
 SIZE_MAX_MB=25         # Maximum file size in MB  
-MAX_REPOS=100          # Max repositories to analyze
+MAX_REPOS=10           # Max repositories to analyze in detail
 MAX_OBJECTS=10         # Max objects per repository
 INCLUDE_DELETED=false  # Include deleted repositories
 REPO_BASE="/data/user/repositories"  # Repository base path
+DEBUG=false            # Enable detailed debug output
 ```
 
-**Sample Output:**
+### Repository Analysis Approach
+
+The script works efficiently on large installations by:
+
+- Analyzing only the most relevant repositories 
+- Processing repositories in order of size (largest first)
+- Limiting the depth of analysis to preserve performance
+- Optimizing file discovery with size-based find commands
+- Using a two-phase approach: quick scanning followed by detailed analysis
+
+### Sample Output
+
+Here's an example of the output you can expect from repo-analysis.sh:
 
 ```
 ANALYSIS SETTINGS:
-- Minimum file size: 1MB
-- Maximum file size: 25MB
-- Max repositories to analyze in detail: 100
+- Minimum file size: 2MB
+- Maximum file size: 10MB
+- Max repositories to analyze in detail: 10
 - Max objects per repository: 10
 - Include deleted repositories: false
 
@@ -325,14 +191,20 @@ Analyzing repositories in /data/user/repositories...
 Initial estimate: 317M	/data/user/repositories/
 Scanning for repositories...
 Found 122 active repositories after filtering
-Performing initial size scan to identify largest repositories...
-Total repository storage: .30 GB across 122 repositories
-Starting repository analysis...
-[1/5] Checking github/dependabot-action...
-[2/5] Checking actions/labeler...
-[3/5] Checking org-a/chaos-repo-1748297529-2...
-[4/5] Checking actions/stale...
-[5/5] Checking actions/setup-python...
+Performing file scan on all active repositories...
+PHASE 1: Quick scan of all repositories for large files...
+Total repository storage: 0.30 GB across 122 repositories
+PHASE 2: Detailed analysis of largest repositories...
+Performing detailed analysis on top 10 largest repositories...
+Skipping detailed analysis - already collected data in Phase 1
+Deduplicating result files...
+Identifying repositories for name resolution...
+Building repository path mappings...
+Resolving friendly names for top 10 repositories with large files...
+Successfully resolved 2 repository names
+Repository name cache entries:
+  org-a/repo-name -> org-a/hook-edge-1748226694
+  actions/labeler -> actions/labeler
 
 ======================================
 REPOSITORY FILE SIZE ANALYSIS SUMMARY
@@ -341,24 +213,62 @@ Total repositories found: 122
 
 FINDINGS SUMMARY:
 ----------------
-1. Repositories with files > 25MB: 2
-   Total files > 25MB: 2
+1. Repositories with files > 10MB: 5
+   Total files > 10MB: 5
 
-2. Repositories with files 1MB-25MB: 18
-   Total files 1MB-25MB: 19
+2. Repositories with files 2MB-10MB: 19
+   Total files 2MB-10MB: 20
 
 TOP 5 REPOSITORIES WITH LARGEST FILES:
 ------------------------------------
-  github/codeql-action: 1 large files
-  actions/labeler: 1 large files
+  org-b/data-service: 1 large files
+  org-c/api-gateway: 1 large files
+  org-d/image-processor: 1 large files
+  org-e/backend-service: 1 large files
+  org-f/frontend-app: 1 large files
 
 REPORTS LOCATION:
 ---------------
-* Files over 25MB: /tmp/repos_over_25mb.txt
-* Files between 1MB-25MB: /tmp/repos_1mb_to_25mb.txt
+* Files over 10MB: /tmp/repos_over_10mb.txt
+* Files between 2MB-10MB: /tmp/repos_2mb_to_10mb.txt
 
-Analysis completed: Tue 27 May 2025 03:07:39 AM UTC
+Analysis completed: Tue 27 May 2025 05:52:38 AM UTC
 ```
 
-The simplified version maintains all the key features while being much easier to understand and maintain.
+## Output Files
+
+When run, repo-analysis.sh generates two output files:
+
+1. `/tmp/repos_over_[MAX_SIZE]mb.txt` - Contains files larger than the maximum size threshold
+2. `/tmp/repos_[MIN_SIZE]mb_to_[MAX_SIZE]mb.txt` - Contains files between minimum and maximum size thresholds
+
+Example output file contents:
+```
+org-b/data-service:objects/pack/pack-cb57fdc311f75da868ea1ecef6fdc1691c6be19e.pack (24.45MB)
+org-c/api-gateway:objects/pack/pack-653bd255bf8474f21f9087b3b4294ca5ba6fe255.pack (26.76MB)
+org-d/image-processor:objects/pack/pack-3c10048ee49d193b3bde170157dca8e4933e9cb3.pack (80.22MB)
+org-e/backend-service:objects/pack/pack-4690736ef7ecdf1e00b11cce5a6a7c4b9b6ba80e.pack (22.70MB)
+org-f/frontend-app:objects/pack/pack-75a64528b945d0e5855e2c52ae006f8232a81589.pack (16.79MB)
+```
+
+The files include:
+- Repository name (friendly format if resolution was successful)
+- Path to the large file within the repository
+- Size of the file in human-readable format
+
+## Conclusion
+
+The repo-analysis.sh script provides a quick and efficient way to analyze Git repositories on GitHub Enterprise Server for large files. Key advantages:
+
+1. **Easy to use**: Simple command-line interface with sensible defaults
+2. **Detailed reports**: Generates comprehensive reports with file sizes and paths
+3. **Human-readable output**: Shows friendly repository names instead of internal paths
+4. **Optimized performance**: Fast analysis even on large installations
+5. **Flexible configuration**: Adjustable thresholds to focus on files of specific sizes
+6. **Path format handling**: Supports both standard and compressed repository paths
+
+For more information, please refer to the script's help information by running:
+```sh
+sudo bash repo-analysis.sh --help
+```
 
