@@ -120,4 +120,14 @@ curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_dis
 sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
 ```
 
+## Recent Improvements
+
+### Enhanced Deleted Repository Detection
+The simplified scripts now use the same robust filtering logic as the original analysis script:
+
+- **Old method**: Only checked for basic marker files (`DELETED`, `.deleted`)
+- **New method**: Verifies repositories have an `objects` directory with pack files
+
+This improvement ensures that GHES deleted repositories are properly filtered out, matching the behavior of the original comprehensive analysis script. The filtering is particularly important in GHES environments where deleted repositories may still have directory structures but lack the actual Git object data.
+
 **Root Cause**: Process substitution `<(...)` doesn't work reliably in all shell environments.

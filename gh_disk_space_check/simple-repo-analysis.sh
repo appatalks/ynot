@@ -208,10 +208,10 @@ mapfile -t all_repos < <(find "$REPO_BASE" -name "*.git" -type d 2>/dev/null | h
 # Filter repositories if not including deleted ones
 repos_to_analyze=()
 for repo in "${all_repos[@]}"; do
-    # Basic filter for deleted repositories
+    # Robust filter for deleted repositories (similar to original script)
     if [[ "$INCLUDE_DELETED" == "false" ]]; then
-        # Skip if repository seems deleted (contains certain markers)
-        if [[ -f "$repo/DELETED" ]] || [[ -f "$repo/.deleted" ]]; then
+        # Check if repository has objects directory with pack files - reliable heuristic for active repos
+        if ! sudo test -d "$repo/objects" || ! sudo find "$repo" -type f -name "*.pack" 2>/dev/null | grep -q .; then
             continue
         fi
     fi
@@ -219,7 +219,14 @@ for repo in "${all_repos[@]}"; do
 done
 
 total_found=${#repos_to_analyze[@]}
-echo "Found $total_found active repositories after filtering"
+total_all=${#all_repos[@]}
+
+if [[ "$INCLUDE_DELETED" == "false" ]]; then
+    excluded=$((total_all - total_found))
+    echo "Found $total_found active repositories after filtering (excluded $excluded deleted/empty repositories)"
+else
+    echo "Found $total_found repositories (no filtering applied)"
+fi
 
 if (( total_found == 0 )); then
     echo "No repositories found to analyze."
