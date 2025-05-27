@@ -289,14 +289,25 @@ if [[ "$DEBUG" == "true" ]]; then
     done
 fi
 
-# Always analyze at least one repository if we have any
-if (( repos_to_process > 0 )); then
+# Skip detailed analysis unless debug is enabled - we already have the data from Phase 1
+if [[ "$DEBUG" == "true" ]] && (( repos_to_process > 0 )); then
+    echo "Running detailed analysis on top repositories with debug enabled..."
     # Analyze top repositories for large files
     for i in "${!top_repos[@]}"; do
         process_repository "${top_repos[$i]}" $((i + 1)) "$repos_to_process"
     done
 else
-    echo "No repositories available for detailed analysis."
+    echo "Skipping detailed analysis - already collected data in Phase 1"
+fi
+
+# First deduplicate the output files to avoid counting repositories multiple times
+echo "Deduplicating result files..."
+if [[ -s "$OVER_MAX_FILE" ]]; then
+    sort -u "$OVER_MAX_FILE" > "${OVER_MAX_FILE}.tmp" && mv "${OVER_MAX_FILE}.tmp" "$OVER_MAX_FILE"
+fi
+
+if [[ -s "$BETWEEN_FILE" ]]; then
+    sort -u "$BETWEEN_FILE" > "${BETWEEN_FILE}.tmp" && mv "${BETWEEN_FILE}.tmp" "$BETWEEN_FILE"
 fi
 
 # Before generating the final report, find the most important repositories to resolve
@@ -306,10 +317,16 @@ top_repos_with_large_files=$(mktemp)
 # Get the repos with the largest files and most files combined from both report files
 awk -F: '{print $1}' "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | sort | uniq -c | sort -nr | head -n "$MAX_REPOS" | awk '{print $2}' > "$top_repos_with_large_files"
 
-# Cache the human-readable names for the top repositories
-echo "Resolving names for up to $MAX_REPOS repositories with large files..."
+echo "Resolving friendly names for top $MAX_REPOS repositories with large files..."
+resolved_count=0
+
 if command -v ghe-nwo &> /dev/null; then
     while read -r repo_path; do
+        # Only process up to MAX_REPOS repositories
+        if (( resolved_count >= MAX_REPOS )); then
+            break
+        fi
+        
         # Find the actual repository path if needed
         actual_path=""
         if [[ -d "$repo_path" ]]; then
@@ -331,6 +348,7 @@ if command -v ghe-nwo &> /dev/null; then
                 # Store in cache
                 repo_name_cache["$repo_path"]="$friendly_name"
                 repo_name_cache["$actual_path"]="$friendly_name"
+                ((resolved_count++))
                 
                 if [[ "$DEBUG" == "true" ]]; then
                     echo "DEBUG: Resolved $repo_path to $friendly_name"
@@ -338,6 +356,8 @@ if command -v ghe-nwo &> /dev/null; then
             fi
         fi
     done < "$top_repos_with_large_files"
+    
+    echo "Successfully resolved $resolved_count repository names"
 fi
 
 rm -f "$top_repos_with_large_files"
