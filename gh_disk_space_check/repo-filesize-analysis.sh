@@ -273,7 +273,7 @@ process_repo() {
     local REPO=$1
     local repo_count=$2
     local total_repos=$3
-    local REPO_NAME=$(echo "$REPO" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+    local REPO_NAME=$(extract_repo_name "$REPO")
     
     # Determine the proper format for the repo name to appear in output once per repository
     local display_repo_name="$REPO_NAME"
@@ -384,6 +384,36 @@ process_repo() {
         # Use flock to synchronize write access to the global variables
         flock /tmp/repo_ids_between.lock -c "echo \"$REPO\" >> /tmp/repo_ids_between.list"
     fi
+}
+
+# Function to extract repository name from path, handling special formats like /nw/ paths
+extract_repo_name() {
+    local repo_path="$1"
+    local repo_name=""
+    
+    # Handle standard repository path format
+    if [[ "$repo_path" == "/data/user/repositories/"* ]]; then
+        repo_name=$(echo "$repo_path" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+        
+        # Special handling for compressed repository paths with /nw/ format
+        # Example: /data/user/repositories/a/nw/a8/7f/f6/4/4.git
+        if [[ "$repo_name" == *"/nw/"* ]]; then
+            # Keep the compressed format as is - it's a special case for GitHub Enterprise Server
+            # Format correctly for display - but don't remove the /nw/ part
+            repo_name=$(echo "$repo_name" | sed 's|/nw/|/nw/|g') # Preserve the /nw/ part
+            
+            # Additional debugging if needed
+            if [ "$VERBOSE" = true ]; then
+                echo "Compressed path detected: $repo_path -> $repo_name" >&2
+            fi
+        fi
+    else
+        # If not a standard path, return as is
+        repo_name="$repo_path"
+    fi
+    
+    # Return the extracted name
+    echo "$repo_name"
 }
 
 # Process repositories
@@ -548,7 +578,7 @@ if [ ! -f /tmp/repo_nwo_lookup.$$ ] && command -v ghe-nwo &> /dev/null; then
     # Get names for any repositories we haven't already looked up
     for repo_path in "${repo_ids_over_max[@]}" "${repo_ids_between[@]}"; do
         if ! grep -q "^$repo_path:" /tmp/repo_nwo_lookup.$$ 2>/dev/null; then
-            repo_name=$(echo "$repo_path" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            repo_name=$(extract_repo_name "$repo_path")
             nwo=$(sudo ghe-nwo "$repo_path" 2>/dev/null)
             if [ -n "$nwo" ]; then
                 echo "$repo_path:$nwo" >> /tmp/repo_nwo_lookup.$$
@@ -579,7 +609,7 @@ if command -v ghe-nwo &> /dev/null; then
     if [ ${#repo_ids_over_max[@]} -gt 0 ]; then
         echo "Processing ${#repo_ids_over_max[@]} repositories with large files..."
         for repo in "${repo_ids_over_max[@]}"; do
-            repo_name=$(echo "$repo" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            repo_name=$(extract_repo_name "$repo")
             nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
             if [ -n "$nwo" ]; then
                 repos_over_max="$repos_over_max $nwo"
@@ -597,7 +627,7 @@ if command -v ghe-nwo &> /dev/null; then
     if [ ${#repo_ids_between[@]} -gt 0 ]; then
         echo "Processing ${#repo_ids_between[@]} repositories with medium files..."
         for repo in "${repo_ids_between[@]}"; do
-            repo_name=$(echo "$repo" | sed 's|/data/user/repositories/||g' | sed 's|\.git$||g')
+            repo_name=$(extract_repo_name "$repo")
             nwo=$(sudo ghe-nwo "$repo" 2>/dev/null)
             if [ -n "$nwo" ]; then
                 repos_between="$repos_between $nwo"

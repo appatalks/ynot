@@ -197,6 +197,23 @@ clean_repo_path() {
         path="${path//\/\//\/}"
     done
     
+    # Special handling for compressed repository paths with /nw/ format (GitHub Enterprise Server)
+    # Examples: /data/user/repositories/a/nw/a8/7f/f6/4/4.git
+    if [[ "$path" == */nw/* ]]; then
+        # Ensure the path is properly formatted for these compressed paths
+        # Clean up any duplicate segments that may have occurred
+        if [[ "$path" =~ (/data/user/repositories/[^/]+)/nw/ ]]; then
+            local base_prefix="${BASH_REMATCH[1]}"
+            local nw_part="${path#*$base_prefix/nw/}"
+            path="$base_prefix/nw/$nw_part"
+            
+            # Verify we don't have duplicate /nw/ parts
+            if [[ "$nw_part" == *"/nw/"* ]]; then
+                path="$base_prefix/nw/${nw_part#*/nw/}"
+            fi
+        fi
+    fi
+    
     # Ensure .git suffix isn't duplicated
     if [[ "$path" == *".git.git" ]]; then
         path="${path%.git.git}.git"
