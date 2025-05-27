@@ -789,7 +789,7 @@ if [ "$RESOLVE_OBJECTS" = "true" ]; then
         
         # Create a temporary directory
         TEMP_DIR=$(mktemp -d)
-        trap 'rm -rf "$TEMP_DIR"' EXIT
+        # trap 'rm -rf "$TEMP_DIR"' EXIT
         # trap 'ls -la "$TEMP_DIR"' EXIT
         
         # Download the required scripts
