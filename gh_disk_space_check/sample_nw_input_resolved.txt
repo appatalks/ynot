@@ -1,9 +1,0 @@
-=== PROCESSING RESULTS ====
-No pack files were successfully processed.
-This could be due to:
-1. Repository paths in the input file are incorrect or have format issues
-2. The repositories no longer exist on this server
-3. The pack files specified no longer exist
-
-Try running: bash process-packs-report.sh -f "sample_nw_input.txt" -v
-to see more detailed error information.
