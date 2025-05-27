@@ -573,23 +573,19 @@ if (( over_max_repos > 0 )); then
             fi
         fi
         
-        # Manual mapping for example in user prompt
-        if [[ "$found_in_cache" == "false" ]]; then
-            # Hard-coded mappings for specific repos mentioned in the example
-            declare -A manual_mappings
-            manual_mappings["b/nw/bd/4c/9a/161/161"]="org-a/hook-edge-1748226694"
-            manual_mappings["c/nw/c7/4d/97/16/16"]="org-b/data-service"
-            manual_mappings["9/nw/98/f1/37/20/20"]="org-c/api-gateway"
-            manual_mappings["6/nw/6f/49/22/18/18"]="org-d/image-processor"
-            manual_mappings["3/nw/3c/59/dc/21/21"]="org-e/backend-service"
-            manual_mappings["1/nw/16/79/09/6/6"]="org-f/frontend-app"
-            
-            if [[ -n "${manual_mappings[$repo]}" ]]; then
-                display_name="${manual_mappings[$repo]}"
-                found_in_cache=true
-                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Used manual mapping for $repo -> $display_name"
-                # Add to cache for future use
-                repo_name_cache["$repo"]="$display_name"
+        # Additional lookup via ghe-nwo if not found in cache
+        if [[ "$found_in_cache" == "false" && "$repo" =~ [a-z0-9]/nw/ ]]; then
+            # One last attempt - try to find the repository using direct ghe-nwo call
+            possible_repo=$(sudo find "$REPO_BASE" -path "*$repo*" -type d -name "*.git" -print -quit 2>/dev/null)
+            if [[ -n "$possible_repo" ]]; then
+                friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
+                if [[ -n "$friendly_name" ]]; then
+                    display_name="$friendly_name"
+                    found_in_cache=true
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolved on demand: $repo -> $display_name"
+                    # Add to cache for future use
+                    repo_name_cache["$repo"]="$display_name"
+                fi
             fi
         fi
         
@@ -623,21 +619,92 @@ update_output_file() {
             
             # Try to find friendly name
             friendly_name="$repo_path"  # Default to the path
+            found_in_cache=false
             
-            # Search for friendly name using the same logic we used for the report
+            # Function to check if a path contains the repo or vice versa
+            path_matches() {
+                local key="$1"
+                local r="$2"
+                # Remove common path prefixes for comparison
+                local clean_key=$(echo "$key" | sed 's|^/data/user/repositories/||' | sed 's|\.git$||')
+                local clean_repo=$(echo "$r" | sed 's|^/data/user/repositories/||' | sed 's|\.git$||')
+                
+                # Check various matching conditions
+                [[ "$clean_key" == "$clean_repo" ]] || 
+                [[ "$clean_key" == *"$clean_repo"* ]] || 
+                [[ "$clean_repo" == *"$clean_key"* ]] || 
+                [[ "$(basename "$clean_key")" == "$(basename "$clean_repo")" ]]
+            }
+            
+            # Try to find the repo in the cache with different matching strategies
             if [[ -n "${repo_name_cache[$repo_path]}" ]]; then
                 friendly_name="${repo_name_cache[$repo_path]}"
-                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found friendly name for $repo_path: $friendly_name"
+                found_in_cache=true
+                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found in cache directly: $repo_path -> $friendly_name"
+            elif [[ -n "${repo_name_cache[$REPO_BASE/$repo_path.git]}" ]]; then
+                friendly_name="${repo_name_cache[$REPO_BASE/$repo_path.git]}"
+                found_in_cache=true
+                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found with full path: $repo_path -> $friendly_name"
+            elif [[ -n "${repo_name_cache[$(basename "$repo_path")]}" ]]; then
+                friendly_name="${repo_name_cache[$(basename "$repo_path")]}"
+                found_in_cache=true
+                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found by basename: $repo_path -> $friendly_name"
             else
-                # Try with common path variations
-                if [[ -n "${repo_name_cache[$REPO_BASE/$repo_path.git]}" ]]; then
-                    friendly_name="${repo_name_cache[$REPO_BASE/$repo_path.git]}"
-                elif [[ -n "${repo_name_cache[$(basename "$repo_path")]}" ]]; then
-                    friendly_name="${repo_name_cache[$(basename "$repo_path")]}"
-                else
-                    # Manual mappings as a last resort
-                    echo "DEBUG: Could not find friendly name for $repo_path, using default path"
+                # Try all cache keys as a last resort
+                for key in "${!repo_name_cache[@]}"; do
+                    if path_matches "$key" "$repo_path"; then
+                        friendly_name="${repo_name_cache[$key]}"
+                        found_in_cache=true
+                        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found with path matching: $repo_path ~ $key -> $friendly_name"
+                        break
+                    fi
+                done
+                
+                # If we still didn't find it, try looking for it by pattern in the repository files themselves
+                if [[ "$found_in_cache" == "false" && "$repo_path" =~ [a-z0-9]/nw/ ]]; then
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Searching for repository ID in files: $repo_path"
+                    # Look for files that might contain this repository ID
+                    repo_file_match=$(grep -l "$repo_path" "$OVER_MAX_FILE" "$BETWEEN_FILE" 2>/dev/null | head -1)
+                    if [[ -n "$repo_file_match" ]]; then
+                        # Extract the pack file path from the repo file
+                        pack_path=$(grep "$repo_path:" "$repo_file_match" | head -1)
+                        if [[ -n "$pack_path" ]]; then
+                            [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found pack path: $pack_path"
+                            # Try to find the full repository containing this pack file
+                            possible_repo=$(sudo find "$REPO_BASE" -path "*$repo_path*" -type d -name "*.git" 2>/dev/null | head -1)
+                            if [[ -n "$possible_repo" ]]; then
+                                friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
+                                if [[ -n "$friendly_name" ]]; then
+                                    friendly_name="$friendly_name"
+                                    found_in_cache=true
+                                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolved on-the-fly: $repo_path -> $friendly_name"
+                                    # Add to cache for future use
+                                    repo_name_cache["$repo_path"]="$friendly_name"
+                                fi
+                            fi
+                        fi
+                    fi
                 fi
+            fi
+            
+            # Additional lookup via ghe-nwo if not found in cache
+            if [[ "$found_in_cache" == "false" && "$repo_path" =~ [a-z0-9]/nw/ ]]; then
+                # One last attempt - try to find the repository using direct ghe-nwo call
+                possible_repo=$(sudo find "$REPO_BASE" -path "*$repo_path*" -type d -name "*.git" -print -quit 2>/dev/null)
+                if [[ -n "$possible_repo" ]]; then
+                    friendly_name=$(ghe-nwo "$possible_repo" 2>/dev/null)
+                    if [[ -n "$friendly_name" ]]; then
+                        friendly_name="$friendly_name"
+                        found_in_cache=true
+                        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolved on demand: $repo_path -> $friendly_name"
+                        # Add to cache for future use
+                        repo_name_cache["$repo_path"]="$friendly_name"
+                    fi
+                fi
+            fi
+            
+            if [[ "$found_in_cache" == "false" ]]; then
+                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Could not find friendly name for $repo_path, using default path"
             fi
             
             # Write the line with the friendly name
