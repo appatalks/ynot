@@ -28,6 +28,16 @@
    - Properly separates pack file names from repository paths in file_info
    - Fixes empty output files that were occurring due to path resolution failures
 
+7. Fixed syntax errors in script (May 26, 2025 update)
+   - Resolved corrupted file header that was causing syntax errors
+   - Properly separated header comments from code section
+   - Ensured script runs without syntax errors
+
+8. Improved size extraction (May 26, 2025 update)
+   - Enhanced regex pattern to handle decimal numbers in sizes (e.g., `80.22MB`)
+   - Added fallback to extract size from full line if not found in file_info
+   - Handles both space and non-space formats in size values
+
 ## Testing
 
 ### Basic Path Handling Tests

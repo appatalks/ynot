@@ -22,6 +22,14 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 - Integrates with GitHub Enterprise Server's `ghe-nwo` command to display proper repository names.
 - Supports compressed repository paths with `/nw/` format (May 2025 update).
 
+### process-packs-report.sh
+- Processes repository analysis output files to resolve Git pack file contents.
+- Handles both standard and compressed (`/nw/` format) repository paths.
+- Identifies and extracts large objects from pack files.
+- Intelligently prioritizes repositories based on size for efficient processing.
+- Advanced path handling for all GitHub Enterprise Server path formats (May 2025 update).
+- Supports decimal sizes and special path formats in input files.
+
 ## Getting Started
 
 ### One-Liner to Run the Script
