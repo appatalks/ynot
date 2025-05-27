@@ -98,7 +98,7 @@ fi
 echo "Found ${REPO_COUNT} repositories in organization ${ORG}."
 
 # Define additional repositories to include
-ADDITIONAL_REPOS=()
+ADDITIONAL_REPOS=("")
 # Add your hardcoded repos here if needed
 # ADDITIONAL_REPOS=("your-repo-1" "your-repo-2")
 
@@ -235,7 +235,7 @@ random_size() {
 }
 
 # Initialize array to track processed repositories
-PROCESSED_REPOS=()
+PROCESSED_REPOS=("")
 
 # Process each repository
 for ((i=0; i<REPOS_TO_ADD; i++)); do
