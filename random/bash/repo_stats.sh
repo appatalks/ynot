@@ -105,11 +105,7 @@ Debug()
 Header()
 {
   echo ""
-  echo "######################################################"
-  echo "######################################################"
-  echo "############# GitHub repo list and sizer #############"
-  echo "######################################################"
-  echo "######################################################"
+  echo "#### GitHub repo list and sizer"
   echo ""
   if [[ -z ${GHE_URL} ]]; then
     echo ""
@@ -197,11 +193,9 @@ Header()
 Footer()
 {
   echo ""
-  echo "######################################################"
+  echo "------------------------------------------------------"
   echo "The script has completed"
   echo "Results file:[${OUTPUT_FILE_NAME}]"
-  echo "######################################################"
-  echo ""
   echo ""
 }
 GetPersonalAccessToken()
@@ -391,10 +385,8 @@ EOF
       GetRepos
     else
       echo ""
-      echo "######################################################"
       echo "ERROR! Failed response back from GitHub on org: ${ORG_NAME}!"
       echo "Please validate your PAT, Organization, and access levels!"
-      echo "######################################################"
     fi
   fi
 }
@@ -502,10 +494,8 @@ AnalyzeIssues()
     GetNextIssues
   else
     echo ""
-    echo "######################################################"
     echo "ERROR! Failed response back from GitHub!"
     echo "Please validate your PAT, Organization, and access levels!"
-    echo "######################################################"
     exit 1
   fi
 }
@@ -573,10 +563,8 @@ AnalyzePullRequests()
     GetNextPullRequests
   else
     echo ""
-    echo "######################################################"
     echo "ERROR! Failed response back from GitHub!"
     echo "Please validate your PAT, Organization, and access levels!"
-    echo "######################################################"
     exit 1
   fi
 }
@@ -640,10 +628,8 @@ AnalyzeReviews()
     GetNextReviews
   else
     echo ""
-    echo "######################################################"
     echo "ERROR! Failed response back from GitHub!"
     echo "Please validate your PAT, Organization, and access levels!"
-    echo "######################################################"
     exit 1
   fi
 }
@@ -743,10 +729,8 @@ EOF
       GetTeams
     else
       echo ""
-      echo "######################################################"
       echo "ERROR! Failed response back from GitHub!"
       echo "Please validate your PAT, Organization, and access levels!"
-      echo "######################################################"
       exit 1
     fi
   fi
