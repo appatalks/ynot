@@ -636,17 +636,7 @@ update_output_file() {
                     friendly_name="${repo_name_cache[$(basename "$repo_path")]}"
                 else
                     # Manual mappings as a last resort
-                    declare -A manual_mappings
-                    manual_mappings["b/nw/bd/4c/9a/161/161"]="org-a/hook-edge-1748226694"
-                    manual_mappings["c/nw/c7/4d/97/16/16"]="org-b/data-service"
-                    manual_mappings["9/nw/98/f1/37/20/20"]="org-c/api-gateway"
-                    manual_mappings["6/nw/6f/49/22/18/18"]="org-d/image-processor"
-                    manual_mappings["3/nw/3c/59/dc/21/21"]="org-e/backend-service"
-                    manual_mappings["1/nw/16/79/09/6/6"]="org-f/frontend-app"
-                    
-                    if [[ -n "${manual_mappings[$repo_path]}" ]]; then
-                        friendly_name="${manual_mappings[$repo_path]}"
-                    fi
+                    echo "DEBUG: Could not find friendly name for $repo_path, using default path"
                 fi
             fi
             
