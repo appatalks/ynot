@@ -389,10 +389,20 @@ echo ""
 if (( over_max_repos > 0 )); then
     echo "TOP 5 REPOSITORIES WITH LARGEST FILES:"
     echo "------------------------------------"
-    awk -F: '{print $1}' "$OVER_MAX_FILE" | sort | uniq -c | sort -nr | head -5 | \
+    # Use a temporary file for the sorted repo counts
+    top_repos_counted=$(mktemp)
+    awk -F: '{print $1}' "$OVER_MAX_FILE" | sort | uniq -c | sort -nr | head -5 > "$top_repos_counted"
+    
     while read -r count repo; do
-        echo "  $repo: $count large files"
-    done
+        # Look up the friendly name from the cache if available
+        display_name="$repo"
+        if [[ -n "${repo_name_cache[$repo]}" ]]; then
+            display_name="${repo_name_cache[$repo]}"
+        fi
+        echo "  $display_name: $count large files"
+    done < "$top_repos_counted"
+    
+    rm -f "$top_repos_counted"
     echo ""
 fi
 
