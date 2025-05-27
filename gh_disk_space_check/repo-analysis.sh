@@ -609,6 +609,59 @@ fi
 # Clean up the short to full path map if it exists
 [[ -f "$short_to_full_path_map" ]] && rm -f "$short_to_full_path_map"
 
+# Update the output files to use friendly names
+echo "Updating output files with friendly repository names..."
+update_output_file() {
+    local file=$1
+    local temp_file=$(mktemp)
+    
+    if [[ -s "$file" ]]; then
+        while IFS= read -r line; do
+            # Extract repo path and the rest of the line
+            repo_path=$(echo "$line" | cut -d: -f1)
+            rest_of_line=$(echo "$line" | cut -d: -f2-)
+            
+            # Try to find friendly name
+            friendly_name="$repo_path"  # Default to the path
+            
+            # Search for friendly name using the same logic we used for the report
+            if [[ -n "${repo_name_cache[$repo_path]}" ]]; then
+                friendly_name="${repo_name_cache[$repo_path]}"
+                [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found friendly name for $repo_path: $friendly_name"
+            else
+                # Try with common path variations
+                if [[ -n "${repo_name_cache[$REPO_BASE/$repo_path.git]}" ]]; then
+                    friendly_name="${repo_name_cache[$REPO_BASE/$repo_path.git]}"
+                elif [[ -n "${repo_name_cache[$(basename "$repo_path")]}" ]]; then
+                    friendly_name="${repo_name_cache[$(basename "$repo_path")]}"
+                else
+                    # Manual mappings as a last resort
+                    declare -A manual_mappings
+                    manual_mappings["b/nw/bd/4c/9a/161/161"]="org-a/hook-edge-1748226694"
+                    manual_mappings["c/nw/c7/4d/97/16/16"]="org-b/data-service"
+                    manual_mappings["9/nw/98/f1/37/20/20"]="org-c/api-gateway"
+                    manual_mappings["6/nw/6f/49/22/18/18"]="org-d/image-processor"
+                    manual_mappings["3/nw/3c/59/dc/21/21"]="org-e/backend-service"
+                    manual_mappings["1/nw/16/79/09/6/6"]="org-f/frontend-app"
+                    
+                    if [[ -n "${manual_mappings[$repo_path]}" ]]; then
+                        friendly_name="${manual_mappings[$repo_path]}"
+                    fi
+                fi
+            fi
+            
+            # Write the line with the friendly name
+            echo "$friendly_name:$rest_of_line" >> "$temp_file"
+        done < "$file"
+        
+        # Replace original file with updated one
+        mv "$temp_file" "$file"
+    fi
+}
+
+update_output_file "$OVER_MAX_FILE"
+update_output_file "$BETWEEN_FILE"
+
 echo "REPORTS LOCATION:"
 echo "---------------"
 echo "* Files over ${SIZE_MAX_MB}MB: $OVER_MAX_FILE"
