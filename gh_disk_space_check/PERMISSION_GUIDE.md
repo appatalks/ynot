@@ -84,7 +84,7 @@ curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_dis
 
 ### Method 3: Use main script with command line options
 ```bash
-curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis.sh -o /tmp/simple-repo-analysis.sh
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh -o /tmp/simple-repo-analysis.sh
 chmod +x /tmp/simple-repo-analysis.sh
 sudo /tmp/simple-repo-analysis.sh --min-size 1 --max-size 25 --max-repos 100
 ```
@@ -149,3 +149,17 @@ The script now includes automatic sudo handling for:
 This eliminates the need to run the entire script with sudo, providing better security by only elevating privileges when needed.
 
 **Root Cause**: ~~Process substitution `<(...)` doesn't work reliably in all shell environments.~~ **RESOLVED** - Script now handles sudo internally.
+
+## ✅ BUG FIX COMPLETED (May 26, 2025)
+
+**Issue Resolved**: The file detection bug has been fixed! The script now properly detects large files in repositories.
+
+**What was fixed**: 
+- Replaced complex `find` command with `-prune` syntax that was causing file detection failures
+- Simplified to use a single `find` command that scans all files and filters by size in post-processing
+- Added comprehensive debug output to help identify issues
+- Both scripts now correctly detect pack files and other large files
+
+**Verification**: The script now successfully finds and reports large files as expected. The original goal of enabling `MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 time bash <(curl -sL URL)` syntax works perfectly.
+
+---

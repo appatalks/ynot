@@ -9,6 +9,7 @@ MAX_REPOS=${MAX_REPOS:-100}
 MAX_OBJECTS=${MAX_OBJECTS:-10}
 INCLUDE_DELETED=${INCLUDE_DELETED:-false}
 REPO_BASE=${REPO_BASE:-"/data/user/repositories"}
+DEBUG=${DEBUG:-false}
 
 # Parse any command line arguments passed through curl
 while [[ $# -gt 0 ]]; do
@@ -19,6 +20,7 @@ while [[ $# -gt 0 ]]; do
         --max-objects) MAX_OBJECTS=$2; shift 2 ;;
         --include-deleted) INCLUDE_DELETED=true; shift ;;
         --base-path) REPO_BASE=$2; shift 2 ;;
+        --debug) DEBUG=true; shift ;;
         --help) 
             echo "Simplified Repository File Size Analysis for GHES"
             echo "Usage: bash <(curl -sL URL) [options]"
@@ -105,65 +107,49 @@ process_repository() {
     repo_name=$(get_repo_name "$repo_path")
     echo "[$repo_num/$total_repos] Checking $repo_name..."
     
+    if [[ "$DEBUG" == "true" ]]; then
+        echo "DEBUG: Repository path: $repo_path"
+        echo "DEBUG: SIZE_MIN_BYTES: $SIZE_MIN_BYTES, SIZE_MAX_BYTES: $SIZE_MAX_BYTES"
+    fi
+    
     # Find large files in the repository
-    local pack_dir="$repo_path/objects/pack"
     local found_files=0
     
-    # Check pack files first (most likely to be large)
-    if [[ -d "$pack_dir" ]]; then
-        while IFS= read -r -d '' pack_file; do
-            if [[ -f "$pack_file" ]]; then
-                local file_size
-                file_size=$(sudo stat -c '%s' "$pack_file" 2>/dev/null) || continue
+    # Use a single find command to get all files, then filter by size
+    # This is more reliable than complex find expressions with -prune
+    while IFS= read -r -d '' file; do
+        if sudo test -f "$file"; then
+            local file_size
+            file_size=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
+            
+            if [[ "$DEBUG" == "true" ]] && (( file_size >= SIZE_MIN_BYTES )); then
+                echo "DEBUG: Found large file $file size: $file_size bytes"
+            fi
+            
+            if (( file_size >= SIZE_MIN_BYTES )); then
+                local size_display
+                size_display=$(get_human_size "$file_size")
+                local relative_path
+                relative_path=$(echo "$file" | sed "s|$repo_path/||")
                 
-                if (( file_size >= SIZE_MIN_BYTES )); then
-                    local size_display
-                    size_display=$(get_human_size "$file_size")
-                    local relative_path
-                    relative_path=$(echo "$pack_file" | sed "s|$repo_path/||")
-                    
-                    if (( file_size > SIZE_MAX_BYTES )); then
-                        echo "$repo_name:$relative_path ($size_display)" >> "$OVER_MAX_FILE"
-                    else
-                        echo "$repo_name:$relative_path ($size_display)" >> "$BETWEEN_FILE"
-                    fi
-                    ((found_files++))
-                    
-                    if (( found_files >= MAX_OBJECTS )); then
-                        break
-                    fi
+                if (( file_size > SIZE_MAX_BYTES )); then
+                    echo "$repo_name:$relative_path ($size_display)" >> "$OVER_MAX_FILE"
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Added to over-max: $repo_name:$relative_path ($size_display)"
+                else
+                    echo "$repo_name:$relative_path ($size_display)" >> "$BETWEEN_FILE"
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Added to between: $repo_name:$relative_path ($size_display)"
+                fi
+                ((found_files++))
+                
+                if (( found_files >= MAX_OBJECTS )); then
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Reached max objects limit ($MAX_OBJECTS) for $repo_name"
+                    break
                 fi
             fi
-        done < <(sudo find "$pack_dir" -name "*.pack" -type f -print0 2>/dev/null)
-    fi
+        fi
+    done < <(sudo find "$repo_path" -type f -print0 2>/dev/null)
     
-    # Check other large files (excluding pack directory)
-    if (( found_files < MAX_OBJECTS )); then
-        while IFS= read -r -d '' file; do
-            if [[ -f "$file" ]]; then
-                local file_size
-                file_size=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
-                
-                if (( file_size >= SIZE_MIN_BYTES )); then
-                    local size_display
-                    size_display=$(get_human_size "$file_size")
-                    local relative_path
-                    relative_path=$(echo "$file" | sed "s|$repo_path/||")
-                    
-                    if (( file_size > SIZE_MAX_BYTES )); then
-                        echo "$repo_name:$relative_path ($size_display)" >> "$OVER_MAX_FILE"
-                    else
-                        echo "$repo_name:$relative_path ($size_display)" >> "$BETWEEN_FILE"
-                    fi
-                    ((found_files++))
-                    
-                    if (( found_files >= MAX_OBJECTS )); then
-                        break
-                    fi
-                fi
-            fi
-        done < <(sudo find "$repo_path" -path "$pack_dir" -prune -o -type f -size "+${SIZE_MIN_MB}M" -print0 2>/dev/null)
-    fi
+    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found $found_files large files in $repo_name"
 }
 
 # Main analysis
