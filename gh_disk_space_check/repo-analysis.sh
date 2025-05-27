@@ -92,6 +92,19 @@ process_repository() {
     # Find large files in the repository
     local found_files=0
     
+    # First check if repository contains any files
+    local file_count
+    file_count=$(sudo find "$repo_path" -type f -name "*" | wc -l)
+    
+    if [[ "$DEBUG" == "true" ]]; then
+        echo "DEBUG: Repository $repo_path contains $file_count files"
+    fi
+    
+    if (( file_count == 0 )); then
+        echo "  No files found in repository"
+        return
+    fi
+    
     # Use a single find command to get all files, then filter by size
     # This is more reliable than complex find expressions with -prune
     while IFS= read -r -d '' file; do
@@ -100,7 +113,7 @@ process_repository() {
             file_size=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
             
             if [[ "$DEBUG" == "true" ]] && (( file_size >= SIZE_MIN_BYTES )); then
-                echo "DEBUG: Found large file $file size: $file_size bytes"
+                echo "DEBUG: Found large file $file size: $file_size bytes ($(get_human_size "$file_size"))"
             fi
             
             if (( file_size >= SIZE_MIN_BYTES )); then
@@ -177,32 +190,92 @@ if (( total_found == 0 )); then
     exit 0
 fi
 
-echo "Performing initial size scan to identify largest repositories..."
+echo "Performing file scan on all active repositories..."
 
-# Get repository sizes and sort by largest
-temp_size_file=$(mktemp)
+# First, we'll scan all repositories for large files directly
+echo "PHASE 1: Quick scan of all repositories for large files..."
 total_storage_kb=0
+repos_scanned=0
 
 for repo in "${repos_to_analyze[@]}"; do
+    repos_scanned=$((repos_scanned + 1))
+    
+    # Get repository size for total statistics
     size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]] && (( size_kb > 0 )); then
-        echo "$size_kb $repo" >> "$temp_size_file"
         ((total_storage_kb += size_kb))
     fi
+    
+    # Progress indicator every 10 repositories
+    if (( repos_scanned % 10 == 0 )); then
+        echo "  Progress: Scanned $repos_scanned/$total_found repositories..."
+    fi
+    
+    # Quick scan for large files using find with -size option
+    repo_name=$(get_repo_name "$repo")
+    
+    # Find files larger than minimum size
+    min_size_find=$(( SIZE_MIN_MB * 1024 ))  # Convert to KB for find command
+    max_size_find=$(( SIZE_MAX_MB * 1024 ))  # Convert to KB for find command
+    
+    # Find files larger than max size directly
+    if [[ "$DEBUG" == "true" ]]; then
+        echo "DEBUG: Scanning $repo for files larger than ${SIZE_MAX_MB}MB"
+    fi
+    
+    sudo find "$repo" -type f -size +${max_size_find}k -print0 2>/dev/null | 
+    while IFS= read -r -d '' file; do
+        size_bytes=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
+        size_display=$(get_human_size "$size_bytes")
+        relative_path=$(echo "$file" | sed "s|$repo/||")
+        echo "$repo_name:$relative_path ($size_display)" >> "$OVER_MAX_FILE"
+        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found large file (over max): $file ($size_display)"
+    done
+    
+    # Find files between min and max size
+    if [[ "$DEBUG" == "true" ]]; then
+        echo "DEBUG: Scanning $repo for files between ${SIZE_MIN_MB}MB and ${SIZE_MAX_MB}MB"
+    fi
+    
+    sudo find "$repo" -type f -size +${min_size_find}k -size -${max_size_find}k -print0 2>/dev/null |
+    while IFS= read -r -d '' file; do
+        size_bytes=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
+        size_display=$(get_human_size "$size_bytes")
+        relative_path=$(echo "$file" | sed "s|$repo/||")
+        echo "$repo_name:$relative_path ($size_display)" >> "$BETWEEN_FILE"
+        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Found large file (between): $file ($size_display)"
+    done
 done
 
 total_storage_gb=$(echo "scale=2; $total_storage_kb/1024/1024" | bc)
 echo "Total repository storage: $total_storage_gb GB across $total_found repositories"
 
-# Sort by size (largest first) and take top repositories for detailed analysis
-mapfile -t top_repos < <(sort -rn "$temp_size_file" | head -n "$MAX_REPOS" | cut -d' ' -f2-)
-rm -f "$temp_size_file"
+# For detailed analysis, select the top MAX_REPOS largest repositories
+echo "PHASE 2: Detailed analysis of largest repositories..."
+temp_size_file=$(mktemp)
 
+# Get list of largest repositories for detailed analysis
+for repo in "${repos_to_analyze[@]}"; do
+    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
+    if [[ -n "$size_kb" ]] && (( size_kb > 0 )); then
+        echo "$size_kb $repo" >> "$temp_size_file"
+    fi
+done
+
+if [[ -s "$temp_size_file" ]]; then
+    # Sort by size (largest first) and take top repositories
+    mapfile -t top_repos < <(sort -rn "$temp_size_file" | head -n "$MAX_REPOS" | cut -d' ' -f2-)
+else
+    top_repos=()
+fi
+
+rm -f "$temp_size_file"
 repos_to_process=${#top_repos[@]}
-echo "Analyzing top $repos_to_process largest repositories for file details..."
+
+echo "Performing detailed analysis on top $repos_to_process largest repositories..."
 
 if [[ "$DEBUG" == "true" ]]; then
-    echo "DEBUG: Selected top repositories:"
+    echo "DEBUG: Selected repositories for analysis:"
     for i in "${!top_repos[@]}"; do
         repo_size_kb=$(sudo du -sk "${top_repos[$i]}" 2>/dev/null | cut -f1)
         repo_size_mb=$(echo "scale=2; $repo_size_kb/1024" | bc)
@@ -210,10 +283,15 @@ if [[ "$DEBUG" == "true" ]]; then
     done
 fi
 
-# Analyze top repositories for large files
-for i in "${!top_repos[@]}"; do
-    process_repository "${top_repos[$i]}" $((i + 1)) "$repos_to_process"
-done
+# Always analyze at least one repository if we have any
+if (( repos_to_process > 0 )); then
+    # Analyze top repositories for large files
+    for i in "${!top_repos[@]}"; do
+        process_repository "${top_repos[$i]}" $((i + 1)) "$repos_to_process"
+    done
+else
+    echo "No repositories available for detailed analysis."
+fi
 
 # Generate summary report
 echo ""
