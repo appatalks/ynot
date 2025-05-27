@@ -20,6 +20,7 @@ Use (`disk_check.sh`) to quickly monitor disk space usage on a GitHub Enterprise
 - Generates detailed reports of large files in plain text format.
 - Can automatically resolve Git object hashes to actual filenames.
 - Integrates with GitHub Enterprise Server's `ghe-nwo` command to display proper repository names.
+- Supports compressed repository paths with `/nw/` format (May 2025 update).
 
 ## Getting Started
 

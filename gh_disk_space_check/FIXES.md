@@ -22,8 +22,15 @@
    - Avoids sed errors that can occur with special characters in paths
    - Handles various edge cases better
 
+6. Fixed handling of repository paths in the file_info section (May 26, 2025 update)
+   - Added special detection for input lines like `github/codeql-action:/data/user/repositories/6/nw/6f/49/22/18/18.git/objects/pack/...`
+   - Correctly identifies and extracts repository paths from file_info when they use the `/nw/` format
+   - Properly separates pack file names from repository paths in file_info
+   - Fixes empty output files that were occurring due to path resolution failures
+
 ## Testing
 
+### Basic Path Handling Tests
 Run the `test_quick.sh` script to verify that both compressed and standard repository paths are correctly processed.
 The script demonstrates:
 
@@ -31,6 +38,12 @@ The script demonstrates:
 2. Path resolution for compressed `/nw/` format repository paths 
 3. Proper repository name extraction in both cases
 4. Correct handling of edge cases and potential duplicated path components
+
+### Advanced Path Parsing Tests
+Run the `test_path_parsing.sh` script to test the path extraction logic specifically for the problematic input format where repository paths are in the file_info section. This tests the key fixes made on May 26, 2025.
+
+### Full Integration Test
+Run the `test_nw_format.sh` script to perform a full integration test with sample input data that includes compressed `/nw/` paths in the file_info section. This verifies that the updated script correctly processes these special path formats.
 
 ## How to Verify
 
