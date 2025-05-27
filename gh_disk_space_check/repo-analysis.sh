@@ -331,8 +331,11 @@ if command -v ghe-nwo &> /dev/null; then
         actual_path=""
         if [[ -d "$repo_path" ]]; then
             actual_path="$repo_path"
+        elif [[ -d "$REPO_BASE/$repo_path.git" ]]; then
+            # Try direct path construction first (faster)
+            actual_path="$REPO_BASE/$repo_path.git"
         else
-            # Try to find the actual repo path in our list
+            # Try to find the actual repo path in our list (slower but more accurate)
             for repo in "${repos_to_analyze[@]}"; do
                 if [[ "$(echo "$repo" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')" == "$repo_path" ]]; then
                     actual_path="$repo"
@@ -345,19 +348,36 @@ if command -v ghe-nwo &> /dev/null; then
             friendly_name=$(ghe-nwo "$actual_path" 2>/dev/null)
             
             if [[ -n "$friendly_name" ]]; then
-                # Store in cache
+                # Store in cache - with multiple variants of the path
                 repo_name_cache["$repo_path"]="$friendly_name"
                 repo_name_cache["$actual_path"]="$friendly_name"
-                ((resolved_count++))
                 
+                # Store without .git suffix for report lookup
+                repo_path_no_git=$(echo "$repo_path" | sed 's|\.git$||g')
+                repo_name_cache["$repo_path_no_git"]="$friendly_name"
+                
+                # Debug output for cache entries
                 if [[ "$DEBUG" == "true" ]]; then
                     echo "DEBUG: Resolved $repo_path to $friendly_name"
+                    echo "DEBUG: Added cache entries for: $repo_path, $actual_path, $repo_path_no_git"
                 fi
+                
+                ((resolved_count++))
+            fi
+        else
+            if [[ "$DEBUG" == "true" ]]; then
+                echo "DEBUG: Could not find actual path for $repo_path"
             fi
         fi
     done < "$top_repos_with_large_files"
     
     echo "Successfully resolved $resolved_count repository names"
+    
+    # Set DEBUG=true temporarily to see cache contents
+    echo "Repository name cache entries:"
+    for key in "${!repo_name_cache[@]}"; do
+        echo "  $key -> ${repo_name_cache[$key]}"
+    done
 fi
 
 rm -f "$top_repos_with_large_files"
@@ -396,9 +416,26 @@ if (( over_max_repos > 0 )); then
     while read -r count repo; do
         # Look up the friendly name from the cache if available
         display_name="$repo"
+        
+        # Try to find the repo in the cache - checking multiple possible formats
         if [[ -n "${repo_name_cache[$repo]}" ]]; then
             display_name="${repo_name_cache[$repo]}"
+            echo "Found in cache directly: $repo -> $display_name"
+        elif [[ -n "${repo_name_cache[$REPO_BASE/$repo.git]}" ]]; then
+            display_name="${repo_name_cache[$REPO_BASE/$repo.git]}"
+            echo "Found with full path: $repo -> $display_name"
+        else
+            # Try all cache keys as a last resort
+            for key in "${!repo_name_cache[@]}"; do
+                # Check if the key ends with our repo path
+                if [[ "$key" == *"$repo"* ]]; then
+                    display_name="${repo_name_cache[$key]}"
+                    echo "Found with partial match: $repo in $key -> $display_name"
+                    break
+                fi
+            done
         fi
+        
         echo "  $display_name: $count large files"
     done < "$top_repos_counted"
     
