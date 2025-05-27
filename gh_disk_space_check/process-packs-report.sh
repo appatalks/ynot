@@ -432,6 +432,14 @@ cat "$INPUT_FILE" | while read -r line; do
                         
                         # Run the resolver with the corrected path
                         adjusted_top_objects=$TOP_OBJECTS
+                        
+                        # Get approximate repository size (if not already defined)
+                        if [ -z "$repo_size_mb" ]; then
+                            repo_size_kb=$(sudo du -sk "$attempted_path" 2>/dev/null | awk '{print $1}')
+                            repo_size_mb=$((repo_size_kb / 1024))
+                        fi
+                        
+                        # Adjust objects based on repo size
                         if [ "$repo_size_mb" -gt 500 ]; then
                             adjusted_top_objects=5
                         fi
@@ -441,7 +449,6 @@ cat "$INPUT_FILE" | while read -r line; do
                     else
                         echo "  The pack file was not found at the corrected location: $corrected_pack_path" >> "$OUTPUT_FILE"
                     fi
-                }
                 fi
             fi
             

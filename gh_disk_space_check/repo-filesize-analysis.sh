@@ -709,15 +709,31 @@ if [ -f /tmp/repo_nwo_lookup.$$ ]; then
             # Replace full paths with friendly names in both output files
             for output_file in "$over_max_file" "$between_file"; do
                 if [ -f "$output_file" ]; then
-                    # First escape any special characters in the path for sed
-                    escaped_path=$(echo "$repo_path" | sed 's/[\/&]/\\&/g')
+                    # Use safer approach with awk instead of sed for problematic paths
+                    # Create a temporary file for the replacements
+                    tmp_file="${output_file}.repl"
+                    > "$tmp_file"
                     
-                    # Replace at beginning of line (repo path)
-                    sudo sed -i "s/^${escaped_path}:/${repo_name}:/g" "$output_file"
+                    # Process the file line by line
+                    while IFS= read -r line; do
+                        # Check if the line starts with the repo path
+                        if [[ "$line" == "$repo_path:"* ]]; then
+                            # Replace with repo name
+                            rest_of_line="${line#$repo_path:}"
+                            echo "$repo_name:$rest_of_line" >> "$tmp_file"
+                        # Check if the line contains the repo path with a space before it
+                        elif [[ "$line" == *" $repo_path:"* ]]; then
+                            echo "${line/ $repo_path:/ $repo_name:}" >> "$tmp_file"
+                        elif [[ "$line" == *" $repo_path/"* ]]; then
+                            echo "${line/ $repo_path\// $repo_name\/}" >> "$tmp_file"
+                        else
+                            # Keep the line as is
+                            echo "$line" >> "$tmp_file"
+                        fi
+                    done < "$output_file"
                     
-                    # Replace in the middle of a line (file paths)
-                    sudo sed -i "s/ ${escaped_path}:/ ${repo_name}:/g" "$output_file"
-                    sudo sed -i "s/ ${escaped_path}\// ${repo_name}\//g" "$output_file"
+                    # Replace the original file with the modified file
+                    sudo mv "$tmp_file" "$output_file"
                 fi
             done
         fi
