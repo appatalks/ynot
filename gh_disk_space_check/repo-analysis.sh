@@ -181,22 +181,12 @@ echo "Performing initial size scan to identify largest repositories..."
 
 # Get repository sizes and sort by largest
 temp_size_file=$(mktemp)
+total_storage_kb=0
+
 for repo in "${repos_to_analyze[@]}"; do
     size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]] && (( size_kb > 0 )); then
         echo "$size_kb $repo" >> "$temp_size_file"
-    fi
-done
-
-# Sort by size (largest first) and take top repositories
-mapfile -t top_repos < <(sort -rn "$temp_size_file" | head -n "$MAX_REPOS" | cut -d' ' -f2-)
-rm -f "$temp_size_file"
-
-# Calculate total storage
-total_storage_kb=0
-for repo in "${repos_to_analyze[@]}"; do
-    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
-    if [[ -n "$size_kb" ]]; then
         ((total_storage_kb += size_kb))
     fi
 done
@@ -204,10 +194,23 @@ done
 total_storage_gb=$(echo "scale=2; $total_storage_kb/1024/1024" | bc)
 echo "Total repository storage: $total_storage_gb GB across $total_found repositories"
 
-# Analyze top repositories
-repos_to_process=${#top_repos[@]}
-echo "Starting repository analysis..."
+# Sort by size (largest first) and take top repositories for detailed analysis
+mapfile -t top_repos < <(sort -rn "$temp_size_file" | head -n "$MAX_REPOS" | cut -d' ' -f2-)
+rm -f "$temp_size_file"
 
+repos_to_process=${#top_repos[@]}
+echo "Analyzing top $repos_to_process largest repositories for file details..."
+
+if [[ "$DEBUG" == "true" ]]; then
+    echo "DEBUG: Selected top repositories:"
+    for i in "${!top_repos[@]}"; do
+        repo_size_kb=$(sudo du -sk "${top_repos[$i]}" 2>/dev/null | cut -f1)
+        repo_size_mb=$(echo "scale=2; $repo_size_kb/1024" | bc)
+        echo "DEBUG: $((i + 1)). ${top_repos[$i]} (${repo_size_mb}MB)"
+    done
+fi
+
+# Analyze top repositories for large files
 for i in "${!top_repos[@]}"; do
     process_repository "${top_repos[$i]}" $((i + 1)) "$repos_to_process"
 done
