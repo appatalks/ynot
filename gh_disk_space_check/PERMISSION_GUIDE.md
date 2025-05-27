@@ -65,9 +65,28 @@ SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
 sudo REPO_BASE="/custom/path" SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
 ```
 
-## ✅ CONFIRMED WORKING COMMAND for your GHES environment:
+## ✅ CONFIRMED WORKING COMMANDS for your GHES environment:
+
+### Method 1: Download first, then execute (RECOMMENDED)
 ```bash
-sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
+# Download the script
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh -o /tmp/simple-repo-analysis.sh
+
+# Make executable and run
+chmod +x /tmp/simple-repo-analysis.sh
+sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 /tmp/simple-repo-analysis.sh
+```
+
+### Method 2: Pipe to bash (alternative)
+```bash
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh | sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash
+```
+
+### Method 3: Use main script with command line options
+```bash
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis.sh -o /tmp/simple-repo-analysis.sh
+chmod +x /tmp/simple-repo-analysis.sh
+sudo /tmp/simple-repo-analysis.sh --min-size 1 --max-size 25 --max-repos 100
 ```
 
 ## Implementation Details
@@ -84,12 +103,21 @@ This approach provides the best user experience while maintaining security requi
 
 ## Quick Reference
 
-**✅ Correct command for your GHES setup:**
+**✅ RECOMMENDED (download first):**
+```bash
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh -o /tmp/simple-repo-analysis.sh
+chmod +x /tmp/simple-repo-analysis.sh
+sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 /tmp/simple-repo-analysis.sh
+```
+
+**✅ ALTERNATIVE (pipe method):**
+```bash
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh | sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash
+```
+
+**❌ Won't work (process substitution issue):**
 ```bash
 sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
 ```
 
-**❌ Won't work (missing sudo):**
-```bash
-MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
-```
+**Root Cause**: Process substitution `<(...)` doesn't work reliably in all shell environments.
