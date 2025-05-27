@@ -19,7 +19,7 @@ show_help() {
     cat << EOF
 Simplified Repository File Size Analysis
 ========================================
-Usage: sudo bash $0 [options]
+Usage: bash $0 [options]
 
 Options:
   -h, --help                Show this help message
@@ -33,8 +33,10 @@ Options:
 Environment Variables:
   SIZE_MIN_MB, SIZE_MAX_MB, MAX_REPOS, MAX_OBJECTS, INCLUDE_DELETED, REPO_BASE
 
+Note: Script automatically uses sudo for repository access when needed
+
 Example:
-  sudo bash $0 --min-size 1 --max-size 25 --max-repos 50
+  bash $0 --min-size 1 --max-size 25 --max-repos 50
 EOF
     exit 0
 }
@@ -53,15 +55,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if running as root
-if [[ $EUID -ne 0 ]]; then
-    echo "Error: This script must be run as root (use sudo)"
-    exit 1
-fi
+# Function to check if we can access repository directory
+check_repo_access() {
+    if [[ ! -d "$REPO_BASE" ]]; then
+        echo "Error: Repository base path not found: $REPO_BASE"
+        echo "Set REPO_BASE environment variable to the correct path"
+        return 1
+    fi
+    
+    # Test if we can read the repository directory with sudo
+    if ! sudo ls "$REPO_BASE" >/dev/null 2>&1; then
+        echo "Error: Cannot access $REPO_BASE even with sudo"
+        echo "Please check that the path exists and you have permission to use sudo"
+        return 1
+    fi
+    
+    return 0
+}
 
-# Validate repository base path
-if [[ ! -d "$REPO_BASE" ]]; then
-    echo "Error: Repository base path not found: $REPO_BASE"
+# Check repository access
+if ! check_repo_access; then
     exit 1
 fi
 
@@ -131,7 +144,7 @@ process_repository() {
         while IFS= read -r -d '' pack_file; do
             if [[ -f "$pack_file" ]]; then
                 local file_size
-                file_size=$(stat -c '%s' "$pack_file" 2>/dev/null) || continue
+                file_size=$(sudo stat -c '%s' "$pack_file" 2>/dev/null) || continue
                 
                 if (( file_size >= SIZE_MIN_BYTES )); then
                     local size_display
@@ -152,7 +165,7 @@ process_repository() {
                     fi
                 fi
             fi
-        done < <(find "$pack_dir" -name "*.pack" -type f -print0 2>/dev/null)
+        done < <(sudo find "$pack_dir" -name "*.pack" -type f -print0 2>/dev/null)
     fi
     
     # Check other large files (excluding pack directory)
@@ -160,7 +173,7 @@ process_repository() {
         while IFS= read -r -d '' file; do
             if [[ -f "$file" ]]; then
                 local file_size
-                file_size=$(stat -c '%s' "$file" 2>/dev/null) || continue
+                file_size=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
                 
                 if (( file_size >= SIZE_MIN_BYTES )); then
                     local size_display
@@ -181,7 +194,7 @@ process_repository() {
                     fi
                 fi
             fi
-        done < <(find "$repo_path" -path "$pack_dir" -prune -o -type f -size "+${SIZE_MIN_MB}M" -print0 2>/dev/null)
+        done < <(sudo find "$repo_path" -path "$pack_dir" -prune -o -type f -size "+${SIZE_MIN_MB}M" -print0 2>/dev/null)
     fi
 }
 
@@ -197,13 +210,13 @@ echo ""
 echo "Analyzing repositories in $REPO_BASE..."
 
 # Get initial size estimate
-total_size=$(du -sh "$REPO_BASE" 2>/dev/null | cut -f1)
+total_size=$(sudo du -sh "$REPO_BASE" 2>/dev/null | cut -f1)
 echo "Initial estimate: $total_size	$REPO_BASE"
 
 echo "Scanning for repositories..."
 
 # Find all Git repositories
-mapfile -t all_repos < <(find "$REPO_BASE" -name "*.git" -type d 2>/dev/null | head -1000)
+mapfile -t all_repos < <(sudo find "$REPO_BASE" -name "*.git" -type d 2>/dev/null | head -1000)
 
 # Filter repositories if not including deleted ones
 repos_to_analyze=()
@@ -240,7 +253,7 @@ declare -A repo_sizes
 temp_size_file=$(mktemp)
 
 for repo in "${repos_to_analyze[@]}"; do
-    size_kb=$(du -sk "$repo" 2>/dev/null | cut -f1)
+    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]] && (( size_kb > 0 )); then
         echo "$size_kb $repo" >> "$temp_size_file"
     fi
@@ -253,7 +266,7 @@ rm -f "$temp_size_file"
 # Calculate total storage
 total_storage_kb=0
 for repo in "${repos_to_analyze[@]}"; do
-    size_kb=$(du -sk "$repo" 2>/dev/null | cut -f1)
+    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]]; then
         ((total_storage_kb += size_kb))
     fi

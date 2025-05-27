@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
             echo "Simplified Repository File Size Analysis for GHES"
             echo "Usage: bash <(curl -sL URL) [options]"
             echo "Environment variables: SIZE_MIN_MB, SIZE_MAX_MB, MAX_REPOS, MAX_OBJECTS, INCLUDE_DELETED, REPO_BASE"
-            echo "Note: May require sudo for access to repository files in $REPO_BASE"
+            echo "Note: Script automatically uses sudo for repository access when needed"
             exit 0 ;;
         *) shift ;;
     esac
@@ -37,10 +37,10 @@ check_repo_access() {
         return 1
     fi
     
-    # Test if we can read the repository directory
-    if ! ls "$REPO_BASE" >/dev/null 2>&1; then
-        echo "Warning: Cannot access $REPO_BASE - you may need to run with sudo"
-        echo "Try: sudo MAX_REPOS=$MAX_REPOS SIZE_MIN_MB=$SIZE_MIN_MB SIZE_MAX_MB=$SIZE_MAX_MB bash <(curl -sL URL)"
+    # Test if we can read the repository directory with sudo
+    if ! sudo ls "$REPO_BASE" >/dev/null 2>&1; then
+        echo "Error: Cannot access $REPO_BASE even with sudo"
+        echo "Please check that the path exists and you have permission to use sudo"
         return 1
     fi
     
@@ -114,7 +114,7 @@ process_repository() {
         while IFS= read -r -d '' pack_file; do
             if [[ -f "$pack_file" ]]; then
                 local file_size
-                file_size=$(stat -c '%s' "$pack_file" 2>/dev/null) || continue
+                file_size=$(sudo stat -c '%s' "$pack_file" 2>/dev/null) || continue
                 
                 if (( file_size >= SIZE_MIN_BYTES )); then
                     local size_display
@@ -134,7 +134,7 @@ process_repository() {
                     fi
                 fi
             fi
-        done < <(find "$pack_dir" -name "*.pack" -type f -print0 2>/dev/null)
+        done < <(sudo find "$pack_dir" -name "*.pack" -type f -print0 2>/dev/null)
     fi
     
     # Check other large files (excluding pack directory)
@@ -142,7 +142,7 @@ process_repository() {
         while IFS= read -r -d '' file; do
             if [[ -f "$file" ]]; then
                 local file_size
-                file_size=$(stat -c '%s' "$file" 2>/dev/null) || continue
+                file_size=$(sudo stat -c '%s' "$file" 2>/dev/null) || continue
                 
                 if (( file_size >= SIZE_MIN_BYTES )); then
                     local size_display
@@ -162,7 +162,7 @@ process_repository() {
                     fi
                 fi
             fi
-        done < <(find "$repo_path" -path "$pack_dir" -prune -o -type f -size "+${SIZE_MIN_MB}M" -print0 2>/dev/null)
+        done < <(sudo find "$repo_path" -path "$pack_dir" -prune -o -type f -size "+${SIZE_MIN_MB}M" -print0 2>/dev/null)
     fi
 }
 
@@ -178,13 +178,13 @@ echo ""
 echo "Analyzing repositories in $REPO_BASE..."
 
 # Get initial size estimate
-total_size=$(du -sh "$REPO_BASE" 2>/dev/null | cut -f1)
+total_size=$(sudo du -sh "$REPO_BASE" 2>/dev/null | cut -f1)
 echo "Initial estimate: $total_size	$REPO_BASE"
 
 echo "Scanning for repositories..."
 
 # Find all Git repositories
-mapfile -t all_repos < <(find "$REPO_BASE" -name "*.git" -type d 2>/dev/null | head -1000)
+mapfile -t all_repos < <(sudo find "$REPO_BASE" -name "*.git" -type d 2>/dev/null | head -1000)
 
 # Filter repositories if not including deleted ones
 repos_to_analyze=()
@@ -219,7 +219,7 @@ echo "Performing initial size scan to identify largest repositories..."
 # Get repository sizes and sort by largest
 temp_size_file=$(mktemp)
 for repo in "${repos_to_analyze[@]}"; do
-    size_kb=$(du -sk "$repo" 2>/dev/null | cut -f1)
+    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]] && (( size_kb > 0 )); then
         echo "$size_kb $repo" >> "$temp_size_file"
     fi
@@ -232,7 +232,7 @@ rm -f "$temp_size_file"
 # Calculate total storage
 total_storage_kb=0
 for repo in "${repos_to_analyze[@]}"; do
-    size_kb=$(du -sk "$repo" 2>/dev/null | cut -f1)
+    size_kb=$(sudo du -sk "$repo" 2>/dev/null | cut -f1)
     if [[ -n "$size_kb" ]]; then
         ((total_storage_kb += size_kb))
     fi

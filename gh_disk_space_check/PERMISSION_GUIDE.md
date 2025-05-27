@@ -103,24 +103,33 @@ This approach provides the best user experience while maintaining security requi
 
 ## Quick Reference
 
-**✅ RECOMMENDED (download first):**
+**✅ RECOMMENDED (process substitution now works!):**
+```bash
+MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 time bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh)
+```
+
+**✅ ALTERNATIVE (download first):**
 ```bash
 curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh -o /tmp/simple-repo-analysis.sh
 chmod +x /tmp/simple-repo-analysis.sh
-sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 /tmp/simple-repo-analysis.sh
+MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 /tmp/simple-repo-analysis.sh
 ```
 
 **✅ ALTERNATIVE (pipe method):**
 ```bash
-curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh | sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash
-```
-
-**❌ Won't work (process substitution issue):**
-```bash
-sudo MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash <(curl -sL URL)
+curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/gh_disk_space_check/simple-repo-analysis-oneliner.sh | MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 bash
 ```
 
 ## Recent Improvements
+
+### ✅ Process Substitution Now Works!
+**Major Update**: The script now automatically handles sudo internally, so you can use the original desired syntax:
+
+```bash
+MAX_REPOS=100 SIZE_MIN_MB=1 SIZE_MAX_MB=25 time bash <(curl -sL URL)
+```
+
+The script automatically adds `sudo` to commands that need elevated permissions (file access, repository scanning, etc.) while allowing you to run the script normally without prefixing `sudo`.
 
 ### Enhanced Deleted Repository Detection
 The simplified scripts now use the same robust filtering logic as the original analysis script:
@@ -130,4 +139,13 @@ The simplified scripts now use the same robust filtering logic as the original a
 
 This improvement ensures that GHES deleted repositories are properly filtered out, matching the behavior of the original comprehensive analysis script. The filtering is particularly important in GHES environments where deleted repositories may still have directory structures but lack the actual Git object data.
 
-**Root Cause**: Process substitution `<(...)` doesn't work reliably in all shell environments.
+### Automatic Permission Handling
+The script now includes automatic sudo handling for:
+- Repository directory scanning (`find` commands)
+- File size calculations (`du` commands) 
+- File metadata access (`stat` commands)
+- Repository object validation
+
+This eliminates the need to run the entire script with sudo, providing better security by only elevating privileges when needed.
+
+**Root Cause**: ~~Process substitution `<(...)` doesn't work reliably in all shell environments.~~ **RESOLVED** - Script now handles sudo internally.
