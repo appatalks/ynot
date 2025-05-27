@@ -69,20 +69,10 @@ get_repo_name() {
         return
     fi
     
-    # Try to use ghe-nwo to get a friendly name first
-    if command -v ghe-nwo &> /dev/null; then
-        friendly_name=$(ghe-nwo "$repo_path" 2>/dev/null)
-        if [[ -n "$friendly_name" ]]; then
-            # Cache it for future use
-            repo_name_cache["$repo_path"]="$friendly_name"
-            echo "$friendly_name"
-            return
-        fi
-    fi
-    
-    # Fallback to path-based name extraction if ghe-nwo failed or doesn't exist
+    # For standard scanning, use only path-based name extraction
+    # ghe-nwo will only be called for top repositories in the final report
     repo_name=$(echo "$repo_path" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
-    # Cache the fallback name too
+    # Cache the name
     repo_name_cache["$repo_path"]="$repo_name"
     echo "$repo_name"
 }
@@ -323,23 +313,9 @@ if [[ -s "$BETWEEN_FILE" ]]; then
     sort -u "$BETWEEN_FILE" > "${BETWEEN_FILE}.tmp" && mv "${BETWEEN_FILE}.tmp" "$BETWEEN_FILE"
 fi
 
-# Before generating the final report, ensure we have proper repository name resolution
-echo "Ensuring repository names are properly resolved..."
-
+# Don't resolve all repository names before the report, only do it for top repositories when needed
 if command -v ghe-nwo &> /dev/null; then
-    echo "Repository friendly names will be used in the report"
-    # Double check our repository name cache to make sure all repositories have been resolved
-    for repo in "${repos_to_analyze[@]}"; do
-        if [[ -z "${repo_name_cache[$repo]}" ]]; then
-            friendly_name=$(ghe-nwo "$repo" 2>/dev/null)
-            if [[ -n "$friendly_name" ]]; then
-                repo_name_cache["$repo"]="$friendly_name"
-                if [[ "$DEBUG" == "true" ]]; then
-                    echo "DEBUG: Resolved $repo to $friendly_name"
-                fi
-            fi
-        fi
-    done
+    echo "Repository friendly names will be resolved for top repositories only"
 else
     echo "ghe-nwo command not available - using path-based repository names"
 fi
@@ -397,47 +373,58 @@ if (( over_max_repos > 0 )); then
     top_repos_counted=$(mktemp)
     awk -F: '{print $1}' "$OVER_MAX_FILE" | sort | uniq -c | sort -nr | head -5 > "$top_repos_counted"
     
+    # Create a limited cache of only the top repositories that need name resolution
+    if command -v ghe-nwo &> /dev/null; then
+        top_repo_path_map=()
+        
+        # First pass: identify full paths for top repos
+        while read -r count repo_short; do
+            for r in "${repos_to_analyze[@]}"; do
+                this_repo_short=$(echo "$r" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
+                this_repo_short_with_git=$(echo "$r" | sed "s|$REPO_BASE/||g")
+                
+                if [[ "$this_repo_short" == "$repo_short" ]] || [[ "$this_repo_short_with_git" == "$repo_short" ]]; then
+                    top_repo_path_map+=("$repo_short:$r")
+                    break
+                fi
+            done
+        done < "$top_repos_counted"
+        
+        # Resolve names for these top repos - this limits the ghe-nwo calls to only the ones we need
+        [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolving friendly names for top repositories only"
+        for mapping in "${top_repo_path_map[@]}"; do
+            repo_short="${mapping%%:*}"
+            repo_path="${mapping#*:}"
+            
+            if [[ -z "${repo_name_cache[$repo_path]}" ]]; then
+                friendly_name=$(ghe-nwo "$repo_path" 2>/dev/null)
+                if [[ -n "$friendly_name" ]]; then
+                    repo_name_cache["$repo_path"]="$friendly_name"
+                    [[ "$DEBUG" == "true" ]] && echo "DEBUG: Resolved $repo_short to $friendly_name"
+                fi
+            fi
+        done
+    fi
+    
+    # Display the results with friendly names when available
     while read -r count repo_short; do
-        # First, check if this is one of the top repositories that had their names resolved
+        display_name="$repo_short"
+        
+        # Find the full path for this repo
         actual_repo_path=""
-        
-        # Debug - see what we're trying to match
-        if [[ "$DEBUG" == "true" ]]; then
-            echo "DEBUG: Trying to find full path for repo: $repo_short"
-        fi
-        
-        # Try to match both with and without .git extension
         for r in "${repos_to_analyze[@]}"; do
-            # Try matching different patterns of the repository path
             this_repo_short=$(echo "$r" | sed "s|$REPO_BASE/||g" | sed 's|\.git$||g')
             this_repo_short_with_git=$(echo "$r" | sed "s|$REPO_BASE/||g")
             
             if [[ "$this_repo_short" == "$repo_short" ]] || [[ "$this_repo_short_with_git" == "$repo_short" ]]; then
                 actual_repo_path="$r"
-                if [[ "$DEBUG" == "true" ]]; then
-                    echo "DEBUG: Found match for $repo_short at $actual_repo_path"
+                # Use cached friendly name if available
+                if [[ -n "${repo_name_cache[$r]}" ]] && [[ "${repo_name_cache[$r]}" != "$repo_short" ]]; then
+                    display_name="${repo_name_cache[$r]}"
                 fi
                 break
             fi
         done
-        
-        # Look up the friendly name directly using ghe-nwo
-        display_name="$repo_short"
-        
-        if [[ -n "$actual_repo_path" ]] && command -v ghe-nwo &> /dev/null; then
-            # Get name directly from ghe-nwo if possible
-            friendly_name=$(ghe-nwo "$actual_repo_path" 2>/dev/null)
-            if [[ -n "$friendly_name" ]]; then
-                display_name="$friendly_name"
-                if [[ "$DEBUG" == "true" ]]; then
-                    echo "DEBUG: Resolved $repo_short to $friendly_name"
-                fi
-            elif [[ "$DEBUG" == "true" ]]; then
-                echo "DEBUG: ghe-nwo failed to resolve name for $actual_repo_path"
-            fi
-        elif [[ "$DEBUG" == "true" ]]; then
-            echo "DEBUG: Couldn't find repo path for $repo_short or ghe-nwo not available"
-        fi
         
         echo "  $display_name: $count large files"
     done < "$top_repos_counted"
