@@ -1,10 +1,8 @@
 #!/bin/bash
-#
-# Description: Lists all organizations and their member counts in either GHES or GHEC
-#
+# Description: Lists all GitHub Apps installed in all organizations for either GHES or GHEC
 
 # Configuration - Set these variables
-GITHUB_PAT="your-personal-access-token"
+GITHUB_PAT="your-personal-access-token" 
 GITHUB_ENV="GHES"  # Options: "GHES" or "GHEC"
 GITHUB_HOSTNAME="your-github-enterprise-server.com"  # e.g., github.example.com
 
@@ -69,28 +67,54 @@ done
 echo
 echo "Found ${#all_orgs[@]} organizations."
 echo
-echo "Organization Membership Counts:"
+echo "Organization GitHub App Installations:"
 echo "---------------------------------------------------------"
-printf "%-40s | %s\n" "Organization" "Member Count"
+printf "%-30s | %-40s | %-15s | %s\n" "Organization" "App Name" "App ID" "Permissions"
 echo "---------------------------------------------------------"
 
-# For each organization, get member count
+# For each organization, get installed apps
 for org in "${all_orgs[@]}"; do
-    # Get headers to check pagination for members
-    members_response_headers=$(curl -s -I -H "Authorization: token ${GITHUB_PAT}" -H "Accept: application/vnd.github.v3+json" "${API_BASE}/orgs/${org}/members?per_page=100")
-    members_last_page=$(get_last_page "$members_response_headers")
+    echo "Checking GitHub Apps for organization: $org..."
     
-    total_members=0
+    # Get installations for this organization
+    installations_response_headers=$(curl -s -I -H "Authorization: token ${GITHUB_PAT}" -H "Accept: application/vnd.github.v3+json" "${API_BASE}/orgs/${org}/installations?per_page=100")
+    installations_last_page=$(get_last_page "$installations_response_headers")
     
-    # Fetch all pages of members for this org
-    for page in $(seq 1 $members_last_page); do
-        members_page=$(github_api_get "/orgs/${org}/members?per_page=100&page=$page")
-        page_count=$(echo "$members_page" | jq '. | length')
-        total_members=$((total_members + page_count))
+    # Track if we found any apps for this org
+    found_apps=false
+    
+    # Fetch all pages of installations for this org
+    for page in $(seq 1 $installations_last_page); do
+        installations_page=$(github_api_get "/orgs/${org}/installations?per_page=100&page=$page")
+        
+        # Process each installation
+        num_installations=$(echo "$installations_page" | jq '.installations | length')
+        
+        if [[ $num_installations -gt 0 ]]; then
+            found_apps=true
+            
+            # Extract and print installation details
+            echo "$installations_page" | jq -c '.installations[]' | while read -r installation; do
+                app_name=$(echo "$installation" | jq -r '.app_name // "N/A"')
+                app_id=$(echo "$installation" | jq -r '.app_id // "N/A"')
+                
+                # Extract some key permissions (modify this as needed to extract relevant permissions)
+                permissions=$(echo "$installation" | jq -r '.permissions | to_entries | map("\(.key):\(.value)") | join(", ")')
+                
+                # Truncate permissions string if it's too long (using bash instead of jq for substring)
+                if [[ ${#permissions} -gt 50 ]]; then
+                    permissions="${permissions:0:50}..."
+                fi
+                
+                printf "%-30s | %-40s | %-15s | %s\n" "$org" "$app_name" "$app_id" "$permissions"
+            done
+        fi
     done
     
-    # Print the organization and member count
-    printf "%-40s | %d\n" "$org" "$total_members"
+    # If no apps were found, print a message
+    if ! $found_apps; then
+        printf "%-30s | %-40s | %-15s | %s\n" "$org" "No GitHub Apps installed" "-" "-"
+    fi
 done
 
 echo "---------------------------------------------------------"
