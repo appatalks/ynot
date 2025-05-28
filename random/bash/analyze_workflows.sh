@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# [CAUTION - NEEDS GOOD TESTING FOR ACCURACY; so take reported stats with grain of salt]
+
 # GitHub Actions Workflow Analysis Script
 # For analyzing workflow data in GitHub Enterprise Server audit logs
 # Usage: ./analyze_workflows.sh [path_to_logs]
