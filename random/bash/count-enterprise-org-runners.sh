@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Usage:
 #   GITHUB_TOKEN=ghp_xxx \
-#   GITHUB_API_HOST=ghe.example.com \ # Set for GitHub Enterprise Server, default is github.com
-#   ENTERPRISE_SLUG=your-enterprise-slug \ # Optional: Only needed for GitHub.com Enterprise accounts
+#   GITHUB_API_HOST=ghe.example.com \  # Optional: Set for GitHub Enterprise Server, default is github.com
+#   ENTERPRISE_SLUG=your-enterprise-slug \  # Optional: Only needed for GitHub.com Enterprise accounts
 #   bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/random/bash/count-enterprise-org-runners.sh)
 
 # Required: GitHub token with admin:enterprise or read:org scope
@@ -40,22 +40,50 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
       while :; do
         response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
           "$GITHUB_API/user/orgs?per_page=$per_page&page=$page")
+          
+        # Check if response is empty or doesn't contain any organizations
+        org_count=$(echo "$response" | jq '. | length')
+        if [[ "$org_count" -eq 0 ]]; then
+          break
+        fi
+        
         page_orgs=$(echo "$response" | jq -r '.[].login')
         [[ -z "$page_orgs" ]] && break
+        
         orgs+=($page_orgs)
         ((page++))
+        
+        # Safety check - don't fetch more than 10 pages
+        if [[ "$page" -gt 10 ]]; then
+          echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+          break
+        fi
       done
     elif [[ "$slug_count" -eq 1 ]]; then
       ENTERPRISE_SLUG=$(echo "$memberships" | jq -r '.[0].enterprise.slug')
       echo "✅ Discovered enterprise slug: $ENTERPRISE_SLUG"
       echo "Fetching organizations for enterprise: $ENTERPRISE_SLUG"
       while :; do
-        response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+        response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
           "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
-        page_orgs=$(echo "$response" | jq -r '.[]?.login')
+          
+        # Check if response is empty
+        org_count=$(echo "$response" | jq '.organizations | length')
+        if [[ "$org_count" -eq 0 ]]; then
+          break
+        fi
+        
+        page_orgs=$(echo "$response" | jq -r '.organizations[].login')
         [[ -z "$page_orgs" ]] && break
+        
         orgs+=($page_orgs)
         ((page++))
+        
+        # Safety check - don't fetch more than 10 pages
+        if [[ "$page" -gt 10 ]]; then
+          echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+          break
+        fi
       done
     else
       echo "⚠️  Multiple enterprises found:"
@@ -66,12 +94,26 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
   else
     echo "Fetching organizations for enterprise: $ENTERPRISE_SLUG"
     while :; do
-      response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+      response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
         "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
-      page_orgs=$(echo "$response" | jq -r '.[]?.login')
+        
+      # Check if response is empty
+      org_count=$(echo "$response" | jq '.organizations | length')
+      if [[ "$org_count" -eq 0 ]]; then
+        break
+      fi
+      
+      page_orgs=$(echo "$response" | jq -r '.organizations[].login')
       [[ -z "$page_orgs" ]] && break
+      
       orgs+=($page_orgs)
       ((page++))
+      
+      # Safety check - don't fetch more than 10 pages
+      if [[ "$page" -gt 10 ]]; then
+        echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+        break
+      fi
     done
   fi
 else
@@ -80,10 +122,24 @@ else
   while :; do
     response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
       "$GITHUB_API/organizations?per_page=$per_page&page=$page")
+    
+    # Check if response is empty or doesn't contain any organizations
+    org_count=$(echo "$response" | jq '. | length')
+    if [[ "$org_count" -eq 0 ]]; then
+      break
+    fi
+    
     page_orgs=$(echo "$response" | jq -r '.[].login')
     [[ -z "$page_orgs" ]] && break
+    
     orgs+=($page_orgs)
     ((page++))
+    
+    # Safety check - don't fetch more than 10 pages to avoid endless loops
+    if [[ "$page" -gt 10 ]]; then
+      echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+      break
+    fi
   done
 fi
 
