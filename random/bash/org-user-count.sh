@@ -5,9 +5,9 @@
 
 # Configuration - Set these variables
 # Default values that can be overridden by environment variables
-: "${GITHUB_PAT:=your-personal-access-token}"
+: "${GITHUB_PAT:=ghp_****}"
 : "${GITHUB_ENV:=GHES}"  # Options: "GHES" or "GHEC"
-: "${GITHUB_HOSTNAME:=your-github-enterprise-server.com}"  # e.g., github.example.com
+: "${GITHUB_HOSTNAME:=git.example.com}"  # e.g., github.example.com
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
