@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Note: This script is compatible with older versions of bash (pre-4.0)
+
 # Usage:
 #   GITHUB_TOKEN=ghp_xxx \
 #   GITHUB_API_HOST=ghe.example.com \  # Optional: Set for GitHub Enterprise Server, default is github.com
@@ -68,10 +70,9 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
       while :; do
         response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
           "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
-          
-        # Check if response is empty - using grep for better compatibility
-        has_orgs=$(echo "$response" | grep -c '"organizations"' || echo "0")
-        if [[ "$has_orgs" -eq 0 ]]; then
+        
+        # Check if response is empty - using grep -q for better compatibility
+        if ! echo "$response" | grep -q '"organizations"'; then
           echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
           break
         fi
@@ -107,9 +108,8 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
       response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
         "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
         
-      # Check if response is empty - using grep for better compatibility
-      has_orgs=$(echo "$response" | grep -c '"organizations"' || echo "0")
-      if [[ "$has_orgs" -eq 0 ]]; then
+      # Check if response is empty - using grep -q for better compatibility
+      if ! echo "$response" | grep -q '"organizations"'; then
         echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
         break
       fi
@@ -209,12 +209,11 @@ for ORG in "${orgs[@]}"; do
     -H "X-GitHub-Api-Version: 2022-11-28" \
     "$runner_api_url")
     
-  # Check if the response contains an error message
-  error_message=$(echo "$response_body" | grep -c "message" || echo "0")
-  if [[ "$error_message" -gt 0 ]]; then
-    status_code="403"  # Assume forbidden if there's an error message
+  # Check if the response contains an error message - simple approach for compatibility
+  if echo "$response_body" | grep -q "message"; then
+    status_code=403  # Assume forbidden if there's an error message
   else
-    status_code="200"  # Assume success if no error message
+    status_code=200  # Assume success if no error message
   fi
   
   if [[ "$status_code" -eq 200 ]]; then
@@ -229,21 +228,19 @@ for ORG in "${orgs[@]}"; do
       -H "X-GitHub-Api-Version: 2022-11-28" \
       "$group_api_url")
       
-    # Check if the response contains an error message
-    group_error_message=$(echo "$group_response_body" | grep -c "message" || echo "0")
-    if [[ "$group_error_message" -gt 0 ]]; then
-      group_status_code="403"  # Assume forbidden if there's an error message
+    # Check if the response contains an error message - simple approach for compatibility
+    if echo "$group_response_body" | grep -q "message"; then
+      group_status_code=403  # Assume forbidden if there's an error message
     else
-      group_status_code="200"  # Assume success if no error message
+      group_status_code=200  # Assume success if no error message
     fi
     
     if [[ "$group_status_code" -eq 200 ]]; then
       group_count=$(echo "$group_response_body" | jq '.total_count')
       echo "  Runner groups: $group_count"
       
-      # Check if we have runner_groups in the response - using grep for compatibility
-      has_groups=$(echo "$group_response_body" | grep -c '"runner_groups"' || echo "0")
-      if [[ "$has_groups" -gt 0 ]]; then
+      # Check if we have runner_groups in the response - using grep -q for compatibility
+      if echo "$group_response_body" | grep -q '"runner_groups"'; then
         # Check if there are any default groups
         default_group_count=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == true)) | length')
         if [[ "$default_group_count" -gt 0 ]]; then
@@ -267,19 +264,23 @@ for ORG in "${orgs[@]}"; do
         echo "    No runner groups data available"
       fi
     else
-      # Extract error message in a way compatible with older Bash
-      error_message=$(echo "$group_response_body" | grep -o '"message": *"[^"]*"' | head -1 | sed 's/"message": *"//;s/"$//')
-      if [[ -z "$error_message" ]]; then
+      # Simple error message extraction
+      echo "$group_response_body" | grep -q '"message"' && {
+        error_message=$(echo "$group_response_body" | grep -o '"message"[^,}]*' | sed 's/"message":*"//g;s/"//g')
+        [ -z "$error_message" ] && error_message="Unknown error"
+      } || {
         error_message="Unknown error"
-      fi
+      }
       echo "  Runner groups: Access denied - $error_message"
     fi
   else
-    # Extract error message in a way compatible with older Bash
-    error_message=$(echo "$response_body" | grep -o '"message": *"[^"]*"' | head -1 | sed 's/"message": *"//;s/"$//')
-    if [[ -z "$error_message" ]]; then
+    # Simple error message extraction
+    echo "$response_body" | grep -q '"message"' && {
+      error_message=$(echo "$response_body" | grep -o '"message"[^,}]*' | sed 's/"message":*"//g;s/"//g')
+      [ -z "$error_message" ] && error_message="Unknown error"
+    } || {
       error_message="Unknown error"
-    fi
+    }
     echo "  Access denied - $error_message"
   fi
 
