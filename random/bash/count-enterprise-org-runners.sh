@@ -4,6 +4,7 @@ set -euo pipefail
 # Usage:
 #   GITHUB_TOKEN=ghp_xxx \
 #   GITHUB_API_HOST=ghe.example.com \
+#   ENTERPRISE_SLUG=your-enterprise-slug \ # NEEDED IF ON GHES
 #   bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/random/bash/count-enterprise-org-runners.sh)
 
 # Required: GitHub token with admin:enterprise or read:org scope
