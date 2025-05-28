@@ -10,9 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # load all settings
 source "$SCRIPT_DIR/config.env"
 
-# disable credential helpers / SSL prompts globally
-# git config --global credential.helper ""
-git config credential.helper "" # Leave as local to this script
+# disable credential helpers / SSL prompts ONLY if inside a git repo
+if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  git config credential.helper "" # Leave as local to this script
+else
+  echo "⚠️  Not in a git repository; skipping 'git config credential.helper'." >&2
+fi
 export GIT_SSL_NO_VERIFY GIT_TERMINAL_PROMPT
 
 # Display help function
