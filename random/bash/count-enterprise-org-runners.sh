@@ -47,15 +47,17 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
           break
         fi
         
-        page_orgs=$(echo "$response" | jq -r '.[].login')
-        [[ -z "$page_orgs" ]] && break
+        # Extract organization names and add to the array
+        while read -r org_name; do
+          [[ -z "$org_name" ]] && continue
+          orgs+=("$org_name")
+        done < <(echo "$response" | jq -r '.[].login')
         
-        orgs+=($page_orgs)
         ((page++))
         
-        # Safety check - don't fetch more than 10 pages
-        if [[ "$page" -gt 10 ]]; then
-          echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+        # Safety check - don't fetch more than 5 pages
+        if [[ "$page" -gt 5 ]]; then
+          echo "⚠️  Reached page limit (5). If you have more than $(($per_page * 5)) organizations, adjust the script."
           break
         fi
       done
@@ -68,20 +70,28 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
           "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
           
         # Check if response is empty
+        has_orgs=$(echo "$response" | jq 'has("organizations")')
+        if [[ "$has_orgs" != "true" ]]; then
+          echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
+          break
+        fi
+        
         org_count=$(echo "$response" | jq '.organizations | length')
         if [[ "$org_count" -eq 0 ]]; then
           break
         fi
         
-        page_orgs=$(echo "$response" | jq -r '.organizations[].login')
-        [[ -z "$page_orgs" ]] && break
+        # Extract organization names and add to the array
+        while read -r org_name; do
+          [[ -z "$org_name" ]] && continue
+          orgs+=("$org_name")
+        done < <(echo "$response" | jq -r '.organizations[].login')
         
-        orgs+=($page_orgs)
         ((page++))
         
-        # Safety check - don't fetch more than 10 pages
-        if [[ "$page" -gt 10 ]]; then
-          echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+        # Safety check - don't fetch more than 5 pages
+        if [[ "$page" -gt 5 ]]; then
+          echo "⚠️  Reached page limit (5). If you have more than $(($per_page * 5)) organizations, adjust the script."
           break
         fi
       done
@@ -98,20 +108,28 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
         "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
         
       # Check if response is empty
+      has_orgs=$(echo "$response" | jq 'has("organizations")')
+      if [[ "$has_orgs" != "true" ]]; then
+        echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
+        break
+      fi
+      
       org_count=$(echo "$response" | jq '.organizations | length')
       if [[ "$org_count" -eq 0 ]]; then
         break
       fi
       
-      page_orgs=$(echo "$response" | jq -r '.organizations[].login')
-      [[ -z "$page_orgs" ]] && break
+      # Extract organization names and add to the array
+      while read -r org_name; do
+        [[ -z "$org_name" ]] && continue
+        orgs+=("$org_name")
+      done < <(echo "$response" | jq -r '.organizations[].login')
       
-      orgs+=($page_orgs)
       ((page++))
       
-      # Safety check - don't fetch more than 10 pages
-      if [[ "$page" -gt 10 ]]; then
-        echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+      # Safety check - don't fetch more than 5 pages
+      if [[ "$page" -gt 5 ]]; then
+        echo "⚠️  Reached page limit (5). If you have more than $(($per_page * 5)) organizations, adjust the script."
         break
       fi
     done
@@ -119,9 +137,12 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
 else
   # For GHES, simply get all organizations without needing enterprise slug
   echo "Fetching organizations from GitHub Enterprise Server ($GITHUB_API_HOST)"
+  
+  # First try to get orgs the user is a member of - this is more reliable
+  echo "Attempting to fetch organizations you're a member of..."
   while :; do
     response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
-      "$GITHUB_API/organizations?per_page=$per_page&page=$page")
+      "$GITHUB_API/user/orgs?per_page=$per_page&page=$page")
     
     # Check if response is empty or doesn't contain any organizations
     org_count=$(echo "$response" | jq '. | length')
@@ -129,22 +150,39 @@ else
       break
     fi
     
-    page_orgs=$(echo "$response" | jq -r '.[].login')
-    [[ -z "$page_orgs" ]] && break
+    # Extract unique organization names and add to the array
+    # Use an associative array to track unique orgs
+    while read -r org_name; do
+      [[ -z "$org_name" ]] && continue
+      orgs+=("$org_name")
+    done < <(echo "$response" | jq -r '.[].login')
     
-    orgs+=($page_orgs)
     ((page++))
     
-    # Safety check - don't fetch more than 10 pages to avoid endless loops
-    if [[ "$page" -gt 10 ]]; then
-      echo "⚠️  Reached page limit (10). If you have more than $(($per_page * 10)) organizations, adjust the script."
+    # Safety check - don't fetch more than 5 pages
+    if [[ "$page" -gt 5 ]]; then
+      echo "⚠️  Reached page limit (5) for user organizations."
       break
     fi
   done
 fi
 
+# Remove duplicate organizations (in case the API returned duplicates)
+# Use a temporary array to store unique organization names
+declare -A unique_orgs
+unique_orgs_list=()
+
+for org in "${orgs[@]}"; do
+  if [[ -z "${unique_orgs[$org]}" ]]; then
+    unique_orgs[$org]=1
+    unique_orgs_list+=("$org")
+  fi
+done
+
+orgs=("${unique_orgs_list[@]}")
+
 if [[ ${#orgs[@]} -eq 0 ]]; then
-  echo "No organizations found in enterprise."
+  echo "No organizations found that you have access to."
   exit 1
 fi
 
@@ -153,26 +191,55 @@ echo
 
 for ORG in "${orgs[@]}"; do
   echo "Organization: $ORG"
-  # Get self-hosted runners for org
-  runner_count=$(curl -sSL \
+  
+  # Get self-hosted runners for org (with error handling)
+  runner_response=$(curl -sSL \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$GITHUB_API/orgs/$ORG/actions/runners?per_page=1" | jq '.total_count')
-  echo "  Self-hosted runners: $runner_count"
-
-  # Get runner groups and print custom group counts
-  runner_groups=$(curl -sSL \
-    -H "Authorization: Bearer $GITHUB_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$GITHUB_API/orgs/$ORG/actions/runner-groups?per_page=100")
-  group_count=$(echo "$runner_groups" | jq '.total_count')
-  default_group_runners=$(echo "$runner_groups" | jq '[.runner_groups[] | select(.default)] | .[0].runners_count // 0')
-  custom_group_runners=$(echo "$runner_groups" | jq '[.runner_groups[] | select(.default|not)] | map(.runners_count) | add // 0')
-  echo "  Runner groups: $group_count"
-  echo "    Default group runners: $default_group_runners"
-  echo "    Custom group runners: $custom_group_runners"
+    -w "\n%{http_code}" \
+    "$GITHUB_API/orgs/$ORG/actions/runners?per_page=1")
+    
+  status_code=$(echo "$runner_response" | tail -n1)
+  response_body=$(echo "$runner_response" | sed '$d')
+  
+  if [[ "$status_code" -eq 200 ]]; then
+    runner_count=$(echo "$response_body" | jq '.total_count')
+    echo "  Self-hosted runners: $runner_count"
+    
+    # Get runner groups and print custom group counts
+    group_response=$(curl -sSL \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      -w "\n%{http_code}" \
+      "$GITHUB_API/orgs/$ORG/actions/runner-groups?per_page=100")
+      
+    group_status_code=$(echo "$group_response" | tail -n1)
+    group_response_body=$(echo "$group_response" | sed '$d')
+    
+    if [[ "$group_status_code" -eq 200 ]]; then
+      group_count=$(echo "$group_response_body" | jq '.total_count')
+      echo "  Runner groups: $group_count"
+      
+      # Check if we have runner_groups in the response
+      has_groups=$(echo "$group_response_body" | jq 'has("runner_groups")')
+      if [[ "$has_groups" == "true" ]]; then
+        default_group_runners=$(echo "$group_response_body" | jq '[.runner_groups[] | select(.default)] | .[0].runners_count // 0')
+        custom_group_runners=$(echo "$group_response_body" | jq '[.runner_groups[] | select(.default|not)] | map(.runners_count) | add // 0')
+        echo "    Default group runners: $default_group_runners"
+        echo "    Custom group runners: $custom_group_runners"
+      else
+        echo "    No runner groups data available"
+      fi
+    else
+      error_message=$(echo "$group_response_body" | jq -r '.message // "Unknown error"')
+      echo "  Runner groups: Access denied - $error_message"
+    fi
+  else
+    error_message=$(echo "$response_body" | jq -r '.message // "Unknown error"')
+    echo "  Access denied - $error_message"
+  fi
 
   echo "  GitHub-hosted runners: Dynamic (not listable; billed by usage)"
   echo
