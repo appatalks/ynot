@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Usage:
 #   GITHUB_TOKEN=ghp_xxx \
-#   GITHUB_API_HOST=ghe.example.com \
-#   ENTERPRISE_SLUG=your-enterprise-slug \ # NEEDED IF ON GHES
+#   GITHUB_API_HOST=ghe.example.com \ # Set for GitHub Enterprise Server, default is github.com
+#   ENTERPRISE_SLUG=your-enterprise-slug \ # Optional: Only needed for GitHub.com Enterprise accounts
 #   bash <(curl -sL https://raw.githubusercontent.com/appatalks/ynot/refs/heads/main/random/bash/count-enterprise-org-runners.sh)
 
 # Required: GitHub token with admin:enterprise or read:org scope
@@ -23,38 +23,69 @@ fi
 
 per_page=100
 
-# --- Enterprise Slug Discovery ---
-
-# If ENTERPRISE_SLUG is not set, attempt to auto-discover
-if [[ -z "${ENTERPRISE_SLUG:-}" ]]; then
-  echo "🔎 Attempting to discover your enterprise slug..."
-  memberships=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$GITHUB_API/user/memberships/enterprises")
-  slug_count=$(echo "$memberships" | jq 'length')
-  if [[ "$slug_count" -eq 0 ]]; then
-    echo "❌ No enterprise memberships found for your token. Please specify ENTERPRISE_SLUG manually."
-    exit 1
-  elif [[ "$slug_count" -eq 1 ]]; then
-    ENTERPRISE_SLUG=$(echo "$memberships" | jq -r '.[0].enterprise.slug')
-    echo "✅ Discovered enterprise slug: $ENTERPRISE_SLUG"
-  else
-    echo "⚠️  Multiple enterprises found:"
-    echo "$memberships" | jq -r '.[].enterprise | "  - \(.slug): \(.name)"'
-    echo "Please export ENTERPRISE_SLUG manually and rerun the script."
-    exit 1
-  fi
-fi
-
-echo "Fetching organizations for enterprise: $ENTERPRISE_SLUG"
+# Determine how to fetch organizations based on API host
 orgs=()
 page=1
-while :; do
-  response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-    "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
-  page_orgs=$(echo "$response" | jq -r '.[]?.login')
-  [[ -z "$page_orgs" ]] && break
-  orgs+=($page_orgs)
-  ((page++))
-done
+
+if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
+  # For GitHub.com, we need to handle Enterprise accounts differently
+  # --- Enterprise Slug Discovery for GitHub.com ---
+  if [[ -z "${ENTERPRISE_SLUG:-}" ]]; then
+    echo "🔎 Attempting to discover your enterprise slug on GitHub.com..."
+    memberships=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$GITHUB_API/user/memberships/enterprises")
+    slug_count=$(echo "$memberships" | jq 'length')
+    if [[ "$slug_count" -eq 0 ]]; then
+      echo "ℹ️  No enterprise memberships found. Fetching organizations directly..."
+      # User doesn't belong to an enterprise, fetch orgs directly
+      while :; do
+        response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+          "$GITHUB_API/user/orgs?per_page=$per_page&page=$page")
+        page_orgs=$(echo "$response" | jq -r '.[].login')
+        [[ -z "$page_orgs" ]] && break
+        orgs+=($page_orgs)
+        ((page++))
+      done
+    elif [[ "$slug_count" -eq 1 ]]; then
+      ENTERPRISE_SLUG=$(echo "$memberships" | jq -r '.[0].enterprise.slug')
+      echo "✅ Discovered enterprise slug: $ENTERPRISE_SLUG"
+      echo "Fetching organizations for enterprise: $ENTERPRISE_SLUG"
+      while :; do
+        response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+          "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
+        page_orgs=$(echo "$response" | jq -r '.[]?.login')
+        [[ -z "$page_orgs" ]] && break
+        orgs+=($page_orgs)
+        ((page++))
+      done
+    else
+      echo "⚠️  Multiple enterprises found:"
+      echo "$memberships" | jq -r '.[].enterprise | "  - \(.slug): \(.name)"'
+      echo "Please export ENTERPRISE_SLUG manually and rerun the script."
+      exit 1
+    fi
+  else
+    echo "Fetching organizations for enterprise: $ENTERPRISE_SLUG"
+    while :; do
+      response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+        "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
+      page_orgs=$(echo "$response" | jq -r '.[]?.login')
+      [[ -z "$page_orgs" ]] && break
+      orgs+=($page_orgs)
+      ((page++))
+    done
+  fi
+else
+  # For GHES, simply get all organizations without needing enterprise slug
+  echo "Fetching organizations from GitHub Enterprise Server ($GITHUB_API_HOST)"
+  while :; do
+    response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+      "$GITHUB_API/organizations?per_page=$per_page&page=$page")
+    page_orgs=$(echo "$response" | jq -r '.[].login')
+    [[ -z "$page_orgs" ]] && break
+    orgs+=($page_orgs)
+    ((page++))
+  done
+fi
 
 if [[ ${#orgs[@]} -eq 0 ]]; then
   echo "No organizations found in enterprise."
@@ -67,12 +98,18 @@ echo
 for ORG in "${orgs[@]}"; do
   echo "Organization: $ORG"
   # Get self-hosted runners for org
-  runner_count=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  runner_count=$(curl -sSL \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     "$GITHUB_API/orgs/$ORG/actions/runners?per_page=1" | jq '.total_count')
   echo "  Self-hosted runners: $runner_count"
 
   # Get runner groups and print custom group counts
-  runner_groups=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  runner_groups=$(curl -sSL \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     "$GITHUB_API/orgs/$ORG/actions/runner-groups?per_page=100")
   group_count=$(echo "$runner_groups" | jq '.total_count')
   default_group_runners=$(echo "$runner_groups" | jq '[.runner_groups[] | select(.default)] | .[0].runners_count // 0')
