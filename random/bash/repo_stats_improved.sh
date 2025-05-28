@@ -437,9 +437,8 @@ ParseRepoData() {
       
       # Get additional issues if needed
       if [ "$HAS_NEXT_ISSUES_PAGE" == "true" ]; then
-        ProcessRemainingIssues "${OWNER}" "${REPO_NAME}" "${ISSUE_NEXT_PAGE}" "${PROCESSING_TMP_DIR}/issues_${OWNER}_${REPO_NAME}.json"
-        if [ -f "${PROCESSING_TMP_DIR}/issues_${OWNER}_${REPO_NAME}.json" ]; then
-          local ADDITIONAL_ISSUE_STATS=$(cat "${PROCESSING_TMP_DIR}/issues_${OWNER}_${REPO_NAME}.json")
+        local ADDITIONAL_ISSUE_STATS=$(get_remaining_issues "${OWNER}" "${REPO_NAME}" "${ISSUE_NEXT_PAGE}")
+        if [ -n "${ADDITIONAL_ISSUE_STATS}" ]; then
           ISSUE_EVENT_CT=$((ISSUE_EVENT_CT + $(echo "${ADDITIONAL_ISSUE_STATS}" | jq -r '.event_count')))
           ISSUE_COMMENT_CT=$((ISSUE_COMMENT_CT + $(echo "${ADDITIONAL_ISSUE_STATS}" | jq -r '.comment_count')))
         fi
@@ -476,9 +475,8 @@ ParseRepoData() {
           
           # Get additional reviews if needed
           if [ "$HAS_NEXT_REVIEWS_PAGE" == "true" ]; then
-            ProcessRemainingReviews "${OWNER}" "${REPO_NAME}" "${PR_NUMBER}" "${REVIEW_NEXT_PAGE}" "${PROCESSING_TMP_DIR}/reviews_${OWNER}_${REPO_NAME}_${PR_NUMBER}.json"
-            if [ -f "${PROCESSING_TMP_DIR}/reviews_${OWNER}_${REPO_NAME}_${PR_NUMBER}.json" ]; then
-              local ADDITIONAL_REVIEW_STATS=$(cat "${PROCESSING_TMP_DIR}/reviews_${OWNER}_${REPO_NAME}_${PR_NUMBER}.json")
+            local ADDITIONAL_REVIEW_STATS=$(get_remaining_reviews "${OWNER}" "${REPO_NAME}" "${PR_NUMBER}" "${REVIEW_NEXT_PAGE}")
+            if [ -n "${ADDITIONAL_REVIEW_STATS}" ]; then
               PR_REVIEW_COMMENT_CT=$((PR_REVIEW_COMMENT_CT + $(echo "${ADDITIONAL_REVIEW_STATS}" | jq -r '.comment_count')))
             fi
           fi
@@ -495,9 +493,8 @@ ParseRepoData() {
       
       # Get additional PRs if needed
       if [ "$HAS_NEXT_PRS_PAGE" == "true" ]; then
-        ProcessRemainingPRs "${OWNER}" "${REPO_NAME}" "${PR_NEXT_PAGE}" "${PROCESSING_TMP_DIR}/prs_${OWNER}_${REPO_NAME}.json"
-        if [ -f "${PROCESSING_TMP_DIR}/prs_${OWNER}_${REPO_NAME}.json" ]; then
-          local ADDITIONAL_PR_STATS=$(cat "${PROCESSING_TMP_DIR}/prs_${OWNER}_${REPO_NAME}.json")
+        local ADDITIONAL_PR_STATS=$(get_remaining_prs "${OWNER}" "${REPO_NAME}" "${PR_NEXT_PAGE}")
+        if [ -n "${ADDITIONAL_PR_STATS}" ]; then
           ISSUE_EVENT_CT=$((ISSUE_EVENT_CT + $(echo "${ADDITIONAL_PR_STATS}" | jq -r '.event_count')))
           ISSUE_COMMENT_CT=$((ISSUE_COMMENT_CT + $(echo "${ADDITIONAL_PR_STATS}" | jq -r '.comment_count')))
           PR_REVIEW_CT=$((PR_REVIEW_CT + $(echo "${ADDITIONAL_PR_STATS}" | jq -r '.review_count')))
@@ -531,175 +528,162 @@ ParseRepoData() {
     fi
   }
   
-  # Process repositories in parallel
-  if [ -x "$(command -v parallel)" ]; then
-    echo "Processing ${REPO_PAGE_SIZE} repositories in parallel with ${PARALLEL_JOBS} jobs..."
-    # Use GNU Parallel to process repositories
-    export -f process_repo _jq ConvertKBToMB MarkMigrationIssues ProcessRemainingIssues ProcessRemainingPRs ProcessRemainingReviews
-    export OUTPUT_FILE_NAME PROCESSING_TMP_DIR GITHUB_TOKEN GRAPHQL_URL ORG_NAME GHE_URL VERSION
-    export EXTRA_PAGE_SIZE
-    
-    cat "${REPO_LIST_FILE}" | parallel -j "${PARALLEL_JOBS}" --no-notice process_repo
-  else
-    echo "GNU Parallel not found, processing repositories sequentially..."
-    # Process repositories sequentially as fallback
-    for REPO in $(cat "${REPO_LIST_FILE}"); do
-      process_repo "${REPO}"
+  # Process repositories sequentially with improved efficiency
+  # Note: We're not using GNU parallel due to issues with exporting complex functions
+  echo "Processing ${REPO_PAGE_SIZE} repositories with improved efficiency..."
+  
+  # Create a FIFO queue for parallel processing without GNU parallel
+  FIFO="${PROCESSING_TMP_DIR}/repo_fifo"
+  mkfifo "$FIFO"
+  
+  # Start background processes to handle repositories
+  for ((i=1; i<=${PARALLEL_JOBS}; i++)); do
+    (
+      while read -r REPO; do
+        if [ -n "$REPO" ]; then
+          process_repo "$REPO"
+        fi
+      done < "$FIFO"
+    ) &
+  done
+  
+  # Feed the FIFO with repo data
+  (
+    cat "${REPO_LIST_FILE}"
+    # Send termination signals
+    for ((i=1; i<=${PARALLEL_JOBS}; i++)); do
+      echo ""
     done
-  fi
+  ) > "$FIFO"
+  
+  # Wait for all background processes to complete
+  wait
+  
+  # Clean up FIFO
+  rm -f "$FIFO"
 }
 
-# Helper functions to process remaining pages of data
-ProcessRemainingIssues() {
+# Process issues in a single batch instead of recursively
+get_remaining_issues() {
   local OWNER=$1
   local REPO_NAME=$2
   local NEXT_PAGE=$3
-  local OUTPUT_FILE=$4
   local EVENT_COUNT=0
   local COMMENT_COUNT=0
+  local RETRY_COUNT=0
+  local MAX_RETRIES=3
   
-  function generate_graphql_data() {
-    cat <<EOF
-    {
-  "query":"{  repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") { owner { login } name issues(first:${EXTRA_PAGE_SIZE}${NEXT_PAGE}) { totalCount pageInfo { hasNextPage endCursor } nodes { timeline(first: 1) { totalCount } comments(first: 1) { totalCount } } } }}"
-    }
-EOF
-  }
-  
-  ISSUE_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
-  --data "$(generate_graphql_data)" \
-  "${GRAPHQL_URL}")
-  
-  ISSUE_RESPONSE_CODE="${ISSUE_RESPONSE:(-3)}"
-  ISSUE_DATA="${ISSUE_RESPONSE::${#ISSUE_RESPONSE}-4}"
-  
-  if [[ "${ISSUE_RESPONSE_CODE}" != "200" ]]; then
-    echo "Error getting more Issues for Repo: ${OWNER}/${REPO_NAME}"
-    return 1
-  else
-    Debug "ISSUE DATA BLOCK:"
-    DebugJQ "${ISSUE_DATA}"
+  while [ "$NEXT_PAGE" != "" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    local GRAPHQL_QUERY="{  repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") { owner { login } name issues(first:${EXTRA_PAGE_SIZE}${NEXT_PAGE}) { totalCount pageInfo { hasNextPage endCursor } nodes { timeline(first: 1) { totalCount } comments(first: 1) { totalCount } } } }}"
     
-    ERROR_MESSAGE=$(echo "${ISSUE_DATA}" | jq -r '.errors[]?')
-    if [[ -n "${ERROR_MESSAGE}" ]]; then
-      echo "ERROR --- Errors occurred while retrieving issues for repo: ${REPO_NAME}"
-      return 1
+    local ISSUE_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
+    --data "{\"query\":\"${GRAPHQL_QUERY}\"}" \
+    "${GRAPHQL_URL}")
+    
+    local ISSUE_RESPONSE_CODE="${ISSUE_RESPONSE:(-3)}"
+    local ISSUE_DATA="${ISSUE_RESPONSE::${#ISSUE_RESPONSE}-4}"
+    
+    if [[ "${ISSUE_RESPONSE_CODE}" != "200" ]]; then
+      echo "Error getting more Issues for Repo: ${OWNER}/${REPO_NAME}, retrying..."
+      RETRY_COUNT=$((RETRY_COUNT + 1))
+      sleep 2
+      continue
     fi
     
-    local ISSUES=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.nodes')
-    local HAS_NEXT_PAGE=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.pageInfo.hasNextPage')
-    local NEXT_CURSOR=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.pageInfo.endCursor')
+    # Check for errors in the GraphQL response
+    local ERROR_MESSAGE=$(echo "${ISSUE_DATA}" | jq -r '.errors[0].message // empty')
+    if [[ -n "${ERROR_MESSAGE}" ]]; then
+      echo "ERROR --- GraphQL error: ${ERROR_MESSAGE}"
+      return
+    fi
     
+    # Process issues
+    local ISSUES=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.nodes // []')
     for ISSUE in $(echo "${ISSUES}" | jq -r '.[] | @base64'); do
-      _issue_jq() {
-        echo "${ISSUE}" | base64 --decode | jq -r "${1}"
-      }
-      
-      local E_CT=$(_issue_jq '.timeline.totalCount')
-      local C_CT=$(_issue_jq '.comments.totalCount')
+      local ISSUE_OBJ=$(echo "${ISSUE}" | base64 --decode)
+      local E_CT=$(echo "${ISSUE_OBJ}" | jq -r '.timeline.totalCount')
+      local C_CT=$(echo "${ISSUE_OBJ}" | jq -r '.comments.totalCount')
       EVENT_COUNT=$((EVENT_COUNT + E_CT - C_CT))
       COMMENT_COUNT=$((COMMENT_COUNT + C_CT))
     done
     
-    # If there are more pages, process them recursively
+    # Check for next page
+    local HAS_NEXT_PAGE=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.pageInfo.hasNextPage // false')
     if [ "$HAS_NEXT_PAGE" == "true" ]; then
-      local NEW_NEXT_PAGE=', after: \"'${NEXT_CURSOR}'\"'
-      local TEMP_OUT="${PROCESSING_TMP_DIR}/issues_temp_${OWNER}_${REPO_NAME}.json"
-      
-      ProcessRemainingIssues "${OWNER}" "${REPO_NAME}" "${NEW_NEXT_PAGE}" "${TEMP_OUT}"
-      
-      if [ -f "${TEMP_OUT}" ]; then
-        local MORE_STATS=$(cat "${TEMP_OUT}")
-        EVENT_COUNT=$((EVENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.event_count')))
-        COMMENT_COUNT=$((COMMENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.comment_count')))
-        rm -f "${TEMP_OUT}"
-      fi
+      local NEXT_CURSOR=$(echo "${ISSUE_DATA}" | jq -r '.data.repository.issues.pageInfo.endCursor')
+      NEXT_PAGE=", after: \"${NEXT_CURSOR}\""
+    else
+      NEXT_PAGE=""
     fi
     
-    # Write counts to output file
-    echo "{\"event_count\": ${EVENT_COUNT}, \"comment_count\": ${COMMENT_COUNT}}" > "${OUTPUT_FILE}"
-  fi
+    # Reset retry count on success
+    RETRY_COUNT=0
+  done
+  
+  echo "{\"event_count\": ${EVENT_COUNT}, \"comment_count\": ${COMMENT_COUNT}}"
 }
 
-ProcessRemainingPRs() {
+# Process PRs in a single batch instead of recursively
+get_remaining_prs() {
   local OWNER=$1
   local REPO_NAME=$2
   local NEXT_PAGE=$3
-  local OUTPUT_FILE=$4
   local EVENT_COUNT=0
   local COMMENT_COUNT=0
   local REVIEW_COUNT=0
   local REVIEW_COMMENT_COUNT=0
+  local RETRY_COUNT=0
+  local MAX_RETRIES=3
   
-  function generate_graphql_data() {
-    cat <<EOF
-    {
-  "query":"{  repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") {  owner {  login  }  name   pullRequests(first:${EXTRA_PAGE_SIZE}${NEXT_PAGE}) {  totalCount  pageInfo {    hasNextPage  endCursor  }  nodes { number  commits(first:1){  totalCount   }    timeline(first: 1) {  totalCount    }    comments(first: 1) {  totalCount    }    reviews(first: ${EXTRA_PAGE_SIZE}) {  totalCount  pageInfo {    hasNextPage  endCursor  }    nodes {  comments(first: 1) {    totalCount  }  }   }  }  }  }}"
-    }
-EOF
-  }
-  
-  PR_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
-  --data "$(generate_graphql_data)" \
-  "${GRAPHQL_URL}")
-  
-  PR_RESPONSE_CODE="${PR_RESPONSE:(-3)}"
-  PR_DATA="${PR_RESPONSE::${#PR_RESPONSE}-4}"
-  
-  if [[ "$PR_RESPONSE_CODE" != "200" ]]; then
-    echo "Error getting more Pull Requests for Repo: ${OWNER}/${REPO_NAME}"
-    return 1
-  else
-    Debug "PULL_REQUEST DATA BLOCK:"
-    DebugJQ "${PR_DATA}"
+  while [ "$NEXT_PAGE" != "" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    local GRAPHQL_QUERY="{  repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") {  owner {  login  }  name   pullRequests(first:${EXTRA_PAGE_SIZE}${NEXT_PAGE}) {  totalCount  pageInfo {    hasNextPage  endCursor  }  nodes { number  commits(first:1){  totalCount   }    timeline(first: 1) {  totalCount    }    comments(first: 1) {  totalCount    }    reviews(first: ${EXTRA_PAGE_SIZE}) {  totalCount  pageInfo {    hasNextPage  endCursor  }    nodes {  comments(first: 1) {    totalCount  }  }   }  }  }  }}"
     
-    ERROR_MESSAGE=$(echo "${PR_DATA}" | jq -r '.errors[]?')
-    if [[ -n "${ERROR_MESSAGE}" ]]; then
-      echo "ERROR --- Errors occurred while retrieving pull requests for repo: ${REPO_NAME}"
-      return 1
+    local PR_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
+    --data "{\"query\":\"${GRAPHQL_QUERY}\"}" \
+    "${GRAPHQL_URL}")
+    
+    local PR_RESPONSE_CODE="${PR_RESPONSE:(-3)}"
+    local PR_DATA="${PR_RESPONSE::${#PR_RESPONSE}-4}"
+    
+    if [[ "$PR_RESPONSE_CODE" != "200" ]]; then
+      echo "Error getting more Pull Requests for Repo: ${OWNER}/${REPO_NAME}, retrying..."
+      RETRY_COUNT=$((RETRY_COUNT + 1))
+      sleep 2
+      continue
     fi
     
-    local PRS=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.nodes')
-    local HAS_NEXT_PAGE=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage')
-    local NEXT_CURSOR=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.pageInfo.endCursor')
+    # Check for errors in the GraphQL response
+    local ERROR_MESSAGE=$(echo "${PR_DATA}" | jq -r '.errors[0].message // empty')
+    if [[ -n "${ERROR_MESSAGE}" ]]; then
+      echo "ERROR --- GraphQL error: ${ERROR_MESSAGE}"
+      return
+    fi
     
+    # Process PRs
+    local PRS=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.nodes // []')
     for PR in $(echo "${PRS}" | jq -r '.[] | @base64'); do
-      _pr_jq() {
-        echo "${PR}" | base64 --decode | jq -r "${1}"
-      }
-      
-      local PR_NUMBER=$(_pr_jq '.number')
-      local E_CT=$(_pr_jq '.timeline.totalCount')
-      local C_CT=$(_pr_jq '.comments.totalCount')
-      local R_CT=$(_pr_jq '.reviews.totalCount')
-      local CM_CT=$(_pr_jq '.commits.totalCount')
+      local PR_OBJ=$(echo "${PR}" | base64 --decode)
+      local PR_NUMBER=$(echo "${PR_OBJ}" | jq -r '.number')
+      local E_CT=$(echo "${PR_OBJ}" | jq -r '.timeline.totalCount')
+      local C_CT=$(echo "${PR_OBJ}" | jq -r '.comments.totalCount')
+      local R_CT=$(echo "${PR_OBJ}" | jq -r '.reviews.totalCount')
+      local CM_CT=$(echo "${PR_OBJ}" | jq -r '.commits.totalCount')
       
       # Process reviews
       if [[ ${R_CT} -ne 0 ]]; then
-        local REVIEWS=$(_pr_jq '.reviews.nodes')
+        local REVIEWS=$(echo "${PR_OBJ}" | jq -r '.reviews.nodes')
         for REVIEW in $(echo "${REVIEWS}" | jq -r '.[] | @base64'); do
-          _review_jq() {
-            echo "${REVIEW}" | base64 --decode | jq -r "${1}"
-          }
-          local RC_CT=$(_review_jq '.comments.totalCount')
+          local REVIEW_OBJ=$(echo "${REVIEW}" | base64 --decode)
+          local RC_CT=$(echo "${REVIEW_OBJ}" | jq -r '.comments.totalCount')
           REVIEW_COMMENT_COUNT=$((REVIEW_COMMENT_COUNT + RC_CT))
         done
         
         # Check if there are more review pages
-        local HAS_NEXT_REVIEWS=$(_pr_jq '.reviews.pageInfo.hasNextPage')
-        local REVIEWS_NEXT_CURSOR=$(_pr_jq '.reviews.pageInfo.endCursor')
-        
+        local HAS_NEXT_REVIEWS=$(echo "${PR_OBJ}" | jq -r '.reviews.pageInfo.hasNextPage')
         if [ "$HAS_NEXT_REVIEWS" == "true" ]; then
-          local REVIEWS_NEXT_PAGE=', after: \"'${REVIEWS_NEXT_CURSOR}'\"'
-          local TEMP_OUT="${PROCESSING_TMP_DIR}/reviews_temp_${OWNER}_${REPO_NAME}_${PR_NUMBER}.json"
-          
-          ProcessRemainingReviews "${OWNER}" "${REPO_NAME}" "${PR_NUMBER}" "${REVIEWS_NEXT_PAGE}" "${TEMP_OUT}"
-          
-          if [ -f "${TEMP_OUT}" ]; then
-            local MORE_STATS=$(cat "${TEMP_OUT}")
-            REVIEW_COMMENT_COUNT=$((REVIEW_COMMENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.comment_count')))
-            rm -f "${TEMP_OUT}"
-          fi
+          local REVIEWS_NEXT_CURSOR=$(echo "${PR_OBJ}" | jq -r '.reviews.pageInfo.endCursor')
+          local REVIEWS_STATS=$(get_remaining_reviews "${OWNER}" "${REPO_NAME}" "${PR_NUMBER}" ", after: \"${REVIEWS_NEXT_CURSOR}\"")
+          REVIEW_COMMENT_COUNT=$((REVIEW_COMMENT_COUNT + $(echo "${REVIEWS_STATS}" | jq -r '.comment_count')))
         fi
       fi
       
@@ -708,93 +692,78 @@ EOF
       REVIEW_COUNT=$((REVIEW_COUNT + R_CT))
     done
     
-    # If there are more pages, process them recursively
+    # Check for next page
+    local HAS_NEXT_PAGE=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false')
     if [ "$HAS_NEXT_PAGE" == "true" ]; then
-      local NEW_NEXT_PAGE=', after: \"'${NEXT_CURSOR}'\"'
-      local TEMP_OUT="${PROCESSING_TMP_DIR}/prs_temp_${OWNER}_${REPO_NAME}.json"
-      
-      ProcessRemainingPRs "${OWNER}" "${REPO_NAME}" "${NEW_NEXT_PAGE}" "${TEMP_OUT}"
-      
-      if [ -f "${TEMP_OUT}" ]; then
-        local MORE_STATS=$(cat "${TEMP_OUT}")
-        EVENT_COUNT=$((EVENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.event_count')))
-        COMMENT_COUNT=$((COMMENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.comment_count')))
-        REVIEW_COUNT=$((REVIEW_COUNT + $(echo "${MORE_STATS}" | jq -r '.review_count')))
-        REVIEW_COMMENT_COUNT=$((REVIEW_COMMENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.review_comment_count')))
-        rm -f "${TEMP_OUT}"
-      fi
+      local NEXT_CURSOR=$(echo "${PR_DATA}" | jq -r '.data.repository.pullRequests.pageInfo.endCursor')
+      NEXT_PAGE=", after: \"${NEXT_CURSOR}\""
+    else
+      NEXT_PAGE=""
     fi
     
-    # Write counts to output file
-    echo "{\"event_count\": ${EVENT_COUNT}, \"comment_count\": ${COMMENT_COUNT}, \"review_count\": ${REVIEW_COUNT}, \"review_comment_count\": ${REVIEW_COMMENT_COUNT}}" > "${OUTPUT_FILE}"
-  fi
+    # Reset retry count on success
+    RETRY_COUNT=0
+  done
+  
+  echo "{\"event_count\": ${EVENT_COUNT}, \"comment_count\": ${COMMENT_COUNT}, \"review_count\": ${REVIEW_COUNT}, \"review_comment_count\": ${REVIEW_COMMENT_COUNT}}"
 }
 
-ProcessRemainingReviews() {
+# Process reviews in a single batch instead of recursively
+get_remaining_reviews() {
   local OWNER=$1
   local REPO_NAME=$2
   local PR_NUMBER=$3
   local NEXT_PAGE=$4
-  local OUTPUT_FILE=$5
   local COMMENT_COUNT=0
+  local RETRY_COUNT=0
+  local MAX_RETRIES=3
   
-  function generate_graphql_data() {
-    cat <<EOF
-    {
-  "query":"{ repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") { owner { login } name pullRequest(number:${PR_NUMBER}) { commits(first:1){  totalCount   }    timeline(first: 1) {  totalCount    }    comments(first: 1) {  totalCount    }    reviews(first: ${EXTRA_PAGE_SIZE}${NEXT_PAGE}) { totalCount pageInfo { hasNextPage endCursor } nodes { comments(first: 1) {    totalCount } } } } }}"
-    }
-EOF
-  }
-  
-  REVIEW_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
-  --data "$(generate_graphql_data)" \
-  "${GRAPHQL_URL}")
-  
-  REVIEW_RESPONSE_CODE="${REVIEW_RESPONSE:(-3)}"
-  REVIEW_DATA="${REVIEW_RESPONSE::${#REVIEW_RESPONSE}-4}"
-  
-  if [[ "$REVIEW_RESPONSE_CODE" != "200" ]]; then
-    echo "Error getting more PR Reviews for Repo: ${OWNER}/${REPO_NAME} and PR: ${PR_NUMBER}"
-    return 1
-  else
-    Debug "REVIEW DATA BLOCK:"
-    DebugJQ "${REVIEW_DATA}"
+  while [ "$NEXT_PAGE" != "" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    local GRAPHQL_QUERY="{ repository(owner:\"${OWNER}\" name:\"${REPO_NAME}\") { owner { login } name pullRequest(number:${PR_NUMBER}) { commits(first:1){  totalCount   }    timeline(first: 1) {  totalCount    }    comments(first: 1) {  totalCount    }    reviews(first: ${EXTRA_PAGE_SIZE}${NEXT_PAGE}) { totalCount pageInfo { hasNextPage endCursor } nodes { comments(first: 1) {    totalCount } } } } }}"
     
-    ERROR_MESSAGE=$(echo "${REVIEW_DATA}" | jq -r '.errors[]?')
-    if [[ -n "${ERROR_MESSAGE}" ]]; then
-      echo "ERROR --- Errors occurred while retrieving pr reviews for repo: ${REPO_NAME} and pr: ${PR_NUMBER}"
-      return 1
+    local REVIEW_RESPONSE=$(curl -kw '%{http_code}' -s -X POST -H "authorization: Bearer ${GITHUB_TOKEN}" -H "content-type: application/json" \
+    --data "{\"query\":\"${GRAPHQL_QUERY}\"}" \
+    "${GRAPHQL_URL}")
+    
+    local REVIEW_RESPONSE_CODE="${REVIEW_RESPONSE:(-3)}"
+    local REVIEW_DATA="${REVIEW_RESPONSE::${#REVIEW_RESPONSE}-4}"
+    
+    if [[ "$REVIEW_RESPONSE_CODE" != "200" ]]; then
+      echo "Error getting more PR Reviews, retrying..."
+      RETRY_COUNT=$((RETRY_COUNT + 1))
+      sleep 2
+      continue
     fi
     
-    local REVIEWS=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.nodes')
-    local HAS_NEXT_PAGE=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.pageInfo.hasNextPage')
-    local NEXT_CURSOR=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.pageInfo.endCursor')
+    # Check for errors in the GraphQL response
+    local ERROR_MESSAGE=$(echo "${REVIEW_DATA}" | jq -r '.errors[0].message // empty')
+    if [[ -n "${ERROR_MESSAGE}" ]]; then
+      echo "ERROR --- GraphQL error: ${ERROR_MESSAGE}"
+      return
+    fi
     
+    # Process reviews
+    local REVIEWS=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.nodes // []')
     for REVIEW in $(echo "${REVIEWS}" | jq -r '.[] | @base64'); do
-      _review_jq() {
-        echo "${REVIEW}" | base64 --decode | jq -r "${1}"
-      }
-      local C_CT=$(_review_jq '.comments.totalCount')
+      local REVIEW_OBJ=$(echo "${REVIEW}" | base64 --decode)
+      local C_CT=$(echo "${REVIEW_OBJ}" | jq -r '.comments.totalCount')
       COMMENT_COUNT=$((COMMENT_COUNT + C_CT))
     done
     
-    # If there are more pages, process them recursively
+    # Check for next page
+    local HAS_NEXT_PAGE=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.pageInfo.hasNextPage // false')
     if [ "$HAS_NEXT_PAGE" == "true" ]; then
-      local NEW_NEXT_PAGE=', after: \"'${NEXT_CURSOR}'\"'
-      local TEMP_OUT="${PROCESSING_TMP_DIR}/reviews_temp2_${OWNER}_${REPO_NAME}_${PR_NUMBER}.json"
-      
-      ProcessRemainingReviews "${OWNER}" "${REPO_NAME}" "${PR_NUMBER}" "${NEW_NEXT_PAGE}" "${TEMP_OUT}"
-      
-      if [ -f "${TEMP_OUT}" ]; then
-        local MORE_STATS=$(cat "${TEMP_OUT}")
-        COMMENT_COUNT=$((COMMENT_COUNT + $(echo "${MORE_STATS}" | jq -r '.comment_count')))
-        rm -f "${TEMP_OUT}"
-      fi
+      local NEXT_CURSOR=$(echo "${REVIEW_DATA}" | jq -r '.data.repository.pullRequest.reviews.pageInfo.endCursor')
+      NEXT_PAGE=", after: \"${NEXT_CURSOR}\""
+    else
+      NEXT_PAGE=""
     fi
     
-    # Write count to output file
-    echo "{\"comment_count\": ${COMMENT_COUNT}}" > "${OUTPUT_FILE}"
-  fi
+    # Reset retry count on success
+    RETRY_COUNT=0
+  done
+  
+  echo "{\"comment_count\": ${COMMENT_COUNT}}"
 }
 
 GetTeams() {
