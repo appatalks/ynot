@@ -28,6 +28,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --csv               Export results to CSV (default filename)"
       echo "  --csv-file=FILE     Export results to specified CSV file"
       echo "Or use environment variables: GITHUB_PAT, GITHUB_ENV, GITHUB_HOSTNAME"
+      echo
+      echo "Note: If an app name is not available, the app slug will be used instead."
       exit 0
       ;;
     *) echo "Unknown parameter: $1"; exit 1 ;;
@@ -159,13 +161,13 @@ fi
 
 # If CSV export is enabled, create the CSV header
 if [[ "$EXPORT_CSV" == "true" ]]; then
-    echo "Organization,App Name,App ID,Permissions" > "$CSV_FILE"
+    echo "Organization,App Name/Slug,App ID,Permissions" > "$CSV_FILE"
     echo "Results will be exported to: $CSV_FILE"
 fi
 
 echo "Organization GitHub App Installations:"
 echo "---------------------------------------------------------"
-printf "%-30s | %-40s | %-15s | %s\n" "Organization" "App Name" "App ID" "Permissions"
+printf "%-30s | %-40s | %-15s | %s\n" "Organization" "App Name/Slug" "App ID" "Permissions"
 echo "---------------------------------------------------------"
 
 # For each organization, get installed apps
@@ -213,7 +215,8 @@ for org in "${all_orgs[@]}"; do
             
             # Extract and print installation details
             echo "$installations_page" | jq -c '.installations[]' | while read -r installation; do
-                app_name=$(echo "$installation" | jq -r '.app_name // "N/A"')
+                # Get app_name, fallback to app_slug if app_name is missing
+                app_name=$(echo "$installation" | jq -r '.app_name // .app_slug // "Unknown"')
                 app_id=$(echo "$installation" | jq -r '.app_id // "N/A"')
                 
                 # Extract some key permissions (modify this as needed to extract relevant permissions)
