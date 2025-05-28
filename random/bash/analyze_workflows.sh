@@ -9,9 +9,9 @@ set -e
 # Default log location
 LOG_PATH="./github-logs/github-audit.log"
 
-# Use provided log path if specified
-if [ $# -ge 1 ]; then
-  LOG_PATH="$1"
+# If the default log file doesn't exist, try the alternative path
+if [[ ! -f "$LOG_PATH" && -f "/var/log/github-audit.log" ]]; then
+  LOG_PATH="/var/log/github-audit.log"
 fi
 
 # Create a temporary directory for working files
