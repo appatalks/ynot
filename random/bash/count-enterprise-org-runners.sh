@@ -69,9 +69,9 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
         response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
           "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
           
-        # Check if response is empty
-        has_orgs=$(echo "$response" | jq 'has("organizations")')
-        if [[ "$has_orgs" != "true" ]]; then
+        # Check if response is empty - using grep for better compatibility
+        has_orgs=$(echo "$response" | grep -c '"organizations"' || echo "0")
+        if [[ "$has_orgs" -eq 0 ]]; then
           echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
           break
         fi
@@ -107,9 +107,9 @@ if [[ "$GITHUB_API_HOST" == "github.com" ]]; then
       response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
         "$GITHUB_API/enterprises/$ENTERPRISE_SLUG/orgs?per_page=$per_page&page=$page")
         
-      # Check if response is empty
-      has_orgs=$(echo "$response" | jq 'has("organizations")')
-      if [[ "$has_orgs" != "true" ]]; then
+      # Check if response is empty - using grep for better compatibility
+      has_orgs=$(echo "$response" | grep -c '"organizations"' || echo "0")
+      if [[ "$has_orgs" -eq 0 ]]; then
         echo "⚠️  Invalid response from enterprise API. Check your enterprise slug and token permissions."
         break
       fi
@@ -168,17 +168,26 @@ else
 fi
 
 # Remove duplicate organizations (in case the API returned duplicates)
-# Use a temporary array to store unique organization names
-declare -A unique_orgs
+# This implementation is compatible with older Bash versions
 unique_orgs_list=()
 
 for org in "${orgs[@]}"; do
-  if [[ -z "${unique_orgs[$org]}" ]]; then
-    unique_orgs[$org]=1
+  # Check if the org is already in our unique list
+  is_duplicate=0
+  for unique_org in "${unique_orgs_list[@]}"; do
+    if [[ "$org" == "$unique_org" ]]; then
+      is_duplicate=1
+      break
+    fi
+  done
+  
+  # If not a duplicate, add to our unique list
+  if [[ $is_duplicate -eq 0 ]]; then
     unique_orgs_list+=("$org")
   fi
 done
 
+# Replace the original array with our deduplicated list
 orgs=("${unique_orgs_list[@]}")
 
 if [[ ${#orgs[@]} -eq 0 ]]; then
@@ -193,51 +202,84 @@ for ORG in "${orgs[@]}"; do
   echo "Organization: $ORG"
   
   # Get self-hosted runners for org (with error handling)
-  runner_response=$(curl -sSL \
-    -H "Authorization: Bearer $GITHUB_TOKEN" \
+  # Using a simpler approach for older Bash versions
+  runner_api_url="$GITHUB_API/orgs/$ORG/actions/runners?per_page=1"
+  response_body=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    -w "\n%{http_code}" \
-    "$GITHUB_API/orgs/$ORG/actions/runners?per_page=1")
+    "$runner_api_url")
     
-  status_code=$(echo "$runner_response" | tail -n1)
-  response_body=$(echo "$runner_response" | sed '$d')
+  # Check if the response contains an error message
+  error_message=$(echo "$response_body" | grep -c "message" || echo "0")
+  if [[ "$error_message" -gt 0 ]]; then
+    status_code="403"  # Assume forbidden if there's an error message
+  else
+    status_code="200"  # Assume success if no error message
+  fi
   
   if [[ "$status_code" -eq 200 ]]; then
     runner_count=$(echo "$response_body" | jq '.total_count')
     echo "  Self-hosted runners: $runner_count"
     
     # Get runner groups and print custom group counts
-    group_response=$(curl -sSL \
-      -H "Authorization: Bearer $GITHUB_TOKEN" \
+    # Using a simpler approach for older Bash versions
+    group_api_url="$GITHUB_API/orgs/$ORG/actions/runner-groups?per_page=100"
+    group_response_body=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
       -H "Accept: application/vnd.github+json" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
-      -w "\n%{http_code}" \
-      "$GITHUB_API/orgs/$ORG/actions/runner-groups?per_page=100")
+      "$group_api_url")
       
-    group_status_code=$(echo "$group_response" | tail -n1)
-    group_response_body=$(echo "$group_response" | sed '$d')
+    # Check if the response contains an error message
+    group_error_message=$(echo "$group_response_body" | grep -c "message" || echo "0")
+    if [[ "$group_error_message" -gt 0 ]]; then
+      group_status_code="403"  # Assume forbidden if there's an error message
+    else
+      group_status_code="200"  # Assume success if no error message
+    fi
     
     if [[ "$group_status_code" -eq 200 ]]; then
       group_count=$(echo "$group_response_body" | jq '.total_count')
       echo "  Runner groups: $group_count"
       
-      # Check if we have runner_groups in the response
-      has_groups=$(echo "$group_response_body" | jq 'has("runner_groups")')
-      if [[ "$has_groups" == "true" ]]; then
-        default_group_runners=$(echo "$group_response_body" | jq '[.runner_groups[] | select(.default)] | .[0].runners_count // 0')
-        custom_group_runners=$(echo "$group_response_body" | jq '[.runner_groups[] | select(.default|not)] | map(.runners_count) | add // 0')
+      # Check if we have runner_groups in the response - using grep for compatibility
+      has_groups=$(echo "$group_response_body" | grep -c '"runner_groups"' || echo "0")
+      if [[ "$has_groups" -gt 0 ]]; then
+        # Check if there are any default groups
+        default_group_count=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == true)) | length')
+        if [[ "$default_group_count" -gt 0 ]]; then
+          default_group_runners=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == true)) | .[0].runners_count')
+          if [[ "$default_group_runners" == "null" ]]; then
+            default_group_runners=0
+          fi
+        else
+          default_group_runners=0
+        fi
+        
+        # Get custom group runners
+        custom_group_runners=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == false)) | map(.runners_count) | add')
+        if [[ "$custom_group_runners" == "null" ]]; then
+          custom_group_runners=0
+        fi
+        
         echo "    Default group runners: $default_group_runners"
         echo "    Custom group runners: $custom_group_runners"
       else
         echo "    No runner groups data available"
       fi
     else
-      error_message=$(echo "$group_response_body" | jq -r '.message // "Unknown error"')
+      # Extract error message in a way compatible with older Bash
+      error_message=$(echo "$group_response_body" | grep -o '"message": *"[^"]*"' | head -1 | sed 's/"message": *"//;s/"$//')
+      if [[ -z "$error_message" ]]; then
+        error_message="Unknown error"
+      fi
       echo "  Runner groups: Access denied - $error_message"
     fi
   else
-    error_message=$(echo "$response_body" | jq -r '.message // "Unknown error"')
+    # Extract error message in a way compatible with older Bash
+    error_message=$(echo "$response_body" | grep -o '"message": *"[^"]*"' | head -1 | sed 's/"message": *"//;s/"$//')
+    if [[ -z "$error_message" ]]; then
+      error_message="Unknown error"
+    fi
     echo "  Access denied - $error_message"
   fi
 
