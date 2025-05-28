@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Note: This script is compatible with older versions of bash (pre-4.0)
+# Note: This script requires Bash 4.0 or higher for associative arrays
 
 # Usage:
 #   GITHUB_TOKEN=ghp_xxx \
@@ -241,22 +241,47 @@ for ORG in "${orgs[@]}"; do
       
       # Check if we have runner_groups in the response - using grep -q for compatibility
       if echo "$group_response_body" | grep -q '"runner_groups"'; then
-        # Check if there are any default groups
-        default_group_count=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == true)) | length')
-        if [[ "$default_group_count" -gt 0 ]]; then
-          default_group_runners=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == true)) | .[0].runners_count')
-          if [[ "$default_group_runners" == "null" ]]; then
-            default_group_runners=0
-          fi
-        else
-          default_group_runners=0
-        fi
+        # Use temporary files to store group runner counts since we're using while loops 
+        # which run in subshells and can't modify parent variables
+        tmp_default_runners=$(mktemp)
+        tmp_custom_runners=$(mktemp)
         
-        # Get custom group runners
-        custom_group_runners=$(echo "$group_response_body" | jq '.runner_groups | map(select(.default == false)) | map(.runners_count) | add')
-        if [[ "$custom_group_runners" == "null" ]]; then
-          custom_group_runners=0
-        fi
+        # Initialize the counter files
+        echo "0" > "$tmp_default_runners"
+        echo "0" > "$tmp_custom_runners"
+        
+        # Get all runner groups and their details
+        group_ids=$(echo "$group_response_body" | jq -r '.runner_groups[] | "\(.id),\(.default),\(.runners_url)"')
+        
+        # Process each group
+        echo "$group_ids" | while IFS=',' read -r group_id is_default runners_url; do
+          # Make API call to get runners for this group
+          group_runners_response=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$runners_url")
+            
+          # Check if we can get the count
+          if ! echo "$group_runners_response" | grep -q "message"; then
+            group_runner_count=$(echo "$group_runners_response" | jq '.total_count')
+            
+            # Update the appropriate counter file
+            if [ "$is_default" = "true" ]; then
+              curr_count=$(cat "$tmp_default_runners")
+              echo "$((curr_count + group_runner_count))" > "$tmp_default_runners"
+            else 
+              curr_count=$(cat "$tmp_custom_runners")
+              echo "$((curr_count + group_runner_count))" > "$tmp_custom_runners"
+            fi
+          fi
+        done
+        
+        # Read the final counts
+        default_group_runners=$(cat "$tmp_default_runners")
+        custom_group_runners=$(cat "$tmp_custom_runners")
+        
+        # Clean up temp files
+        rm -f "$tmp_default_runners" "$tmp_custom_runners"
         
         echo "    Default group runners: $default_group_runners"
         echo "    Custom group runners: $custom_group_runners"
