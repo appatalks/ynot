@@ -325,7 +325,7 @@ scan_and_display_jobs() {
         print_color "$YELLOW" "  API warnings: $API_ERRORS"
     fi
     
-    echo "$total_queued"
+    echo "Total Queued: $total_queued"
 }
 
 # Optimized watch mode
