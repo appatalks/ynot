@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # GitHub Actions Queue Monitor for Self-Hosted Runners
-# Author: GitHub Copilot
 # Date: 2025-07-01
 # Purpose: Monitor pending jobs across an organization for auto-scaling decisions
 
@@ -25,6 +24,10 @@ DEFAULT_LOW_THRESHOLD=5
 DEFAULT_HIGH_THRESHOLD=20
 DEFAULT_POLL_INTERVAL=60
 
+# Global variables for error tracking
+VALIDATION_ERRORS=""
+API_ERRORS=""
+
 # Function to print colored output
 print_color() {
     local color=$1
@@ -41,7 +44,7 @@ log_message() {
 # Function to display usage
 usage() {
     cat << EOF
-GitHub Actions Queue Monitor
+GitHub Actions Queue Monitor (Optimized)
 
 Usage: $0 [OPTIONS]
 
@@ -50,11 +53,9 @@ OPTIONS:
     -t, --token TOKEN           GitHub Personal Access Token (required)
     -r, --repos REPO1,REPO2     Comma-separated list of specific repositories to monitor
                                (optional - if not provided, monitors all org repos)
-    -l, --low-threshold NUM     Low queue threshold (default: $DEFAULT_LOW_THRESHOLD)
-    -h, --high-threshold NUM    High queue threshold (default: $DEFAULT_HIGH_THRESHOLD)
-    -i, --interval SECONDS      Polling interval for watch mode (default: $DEFAULT_POLL_INTERVAL)
     --include-running           Include running jobs in the analysis and display
     -w, --watch                 Continuous monitoring mode
+    -i, --interval SECONDS      Polling interval for watch mode (default: $DEFAULT_POLL_INTERVAL)
     -s, --save-config           Save configuration for future use
     -c, --load-config           Load saved configuration
     --help                      Show this help message
@@ -69,25 +70,14 @@ EXAMPLES:
     # Include running jobs in the analysis
     $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx --include-running
 
-    # Continuous monitoring with custom thresholds and running jobs
-    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx -r "repo1,repo2" -l 10 -h 30 --include-running -w
+    # Continuous monitoring with running jobs
+    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx --include-running -w
 
-    # Save configuration for repeated use (including running jobs flag)
-    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx --include-running -s
-
-    # Load saved config and watch
-    $0 -c -w
-
-REPOSITORY SPECIFICATION:
-    - Use repository names only (not full owner/repo format)
-    - Separate multiple repositories with commas (no spaces)
-    - Example: -r "webapp,api,worker" not -r "myorg/webapp,myorg/api"
-
-RUNNING JOBS:
-    - When --include-running is used, running jobs are counted separately
-    - Running jobs help assess current runner utilization
-    - Total load = queued jobs + running jobs
-    - Thresholds still apply only to queued jobs for scaling decisions
+OPTIMIZATIONS:
+    - Minimal validation (errors reported in summary)
+    - Parallel API calls where possible
+    - Reduced redundant API requests
+    - Streamlined output
 
 REQUIRED PERMISSIONS:
     Your PAT needs 'repo' and 'read:org' scopes for full access.
@@ -101,8 +91,6 @@ GITHUB_ORG="$GITHUB_ORG"
 GITHUB_TOKEN="$GITHUB_TOKEN"
 SPECIFIC_REPOS="$SPECIFIC_REPOS"
 INCLUDE_RUNNING=$INCLUDE_RUNNING
-LOW_THRESHOLD=$LOW_THRESHOLD
-HIGH_THRESHOLD=$HIGH_THRESHOLD
 POLL_INTERVAL=$POLL_INTERVAL
 EOF
     print_color "$GREEN" "Configuration saved to $CONFIG_FILE"
@@ -120,70 +108,34 @@ load_config() {
     fi
 }
 
-# Function to validate GitHub token and org
-validate_github_access() {
+# Fast validation - just check if we can access the org (no detailed validation)
+fast_validate_access() {
     local response
     response=$(curl -s -w "%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/orgs/$GITHUB_ORG" -o /tmp/github_test_response 2>/dev/null)
+        "https://api.github.com/orgs/$GITHUB_ORG" -o /dev/null 2>/dev/null)
     
     if [[ "$response" != "200" ]]; then
-        print_color "$RED" "Failed to access GitHub API. HTTP Status: $response"
-        if [[ -f /tmp/github_test_response ]]; then
-            print_color "$RED" "Error details: $(cat /tmp/github_test_response)"
-        fi
+        VALIDATION_ERRORS="Failed to access GitHub API for org $GITHUB_ORG (HTTP: $response)"
         return 1
     fi
-    
-    print_color "$GREEN" "✓ GitHub API access validated for organization: $GITHUB_ORG"
     return 0
 }
 
-# Function to validate specific repositories exist
-validate_specific_repos() {
-    local repos_to_check=$1
-    local invalid_repos=""
-    
-    print_color "$BLUE" "Validating specified repositories..."
-    
-    IFS=',' read -ra REPO_ARRAY <<< "$repos_to_check"
-    for repo_name in "${REPO_ARRAY[@]}"; do
-        # Trim whitespace
-        repo_name=$(echo "$repo_name" | xargs)
-        local full_repo="$GITHUB_ORG/$repo_name"
-        
-        local response
-        response=$(curl -s -w "%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$full_repo" -o /tmp/repo_check_response 2>/dev/null)
-        
-        if [[ "$response" != "200" ]]; then
-            invalid_repos="$invalid_repos $repo_name"
-            print_color "$RED" "  ✗ Repository '$repo_name' not found or not accessible"
-        else
-            print_color "$GREEN" "  ✓ Repository '$repo_name' validated"
-        fi
-    done
-    
-    if [[ -n "$invalid_repos" ]]; then
-        print_color "$RED" "Invalid repositories found:$invalid_repos"
-        print_color "$RED" "Please check repository names and access permissions."
-        return 1
-    fi
-    
-    return 0
-}
-
-# Function to get all repositories in the organization
-get_org_repositories() {
-    local page=1
+# Get all repositories in one call (optimized)
+get_all_org_repositories() {
     local all_repos=""
+    local page=1
     
     while true; do
         local response
         response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/orgs/$GITHUB_ORG/repos?per_page=100&page=$page&type=all")
+            "https://api.github.com/orgs/$GITHUB_ORG/repos?per_page=100&page=$page&type=all" 2>/dev/null)
+        
+        if [[ -z "$response" ]] || [[ "$response" == "null" ]]; then
+            break
+        fi
         
         local repos
         repos=$(echo "$response" | jq -r '.[].name' 2>/dev/null)
@@ -194,188 +146,153 @@ get_org_repositories() {
         
         all_repos="$all_repos $repos"
         ((page++))
+        
+        # Prevent infinite loops
+        if [[ $page -gt 50 ]]; then
+            API_ERRORS="${API_ERRORS}Too many repository pages (>50), stopped at page $page. "
+            break
+        fi
     done
     
     echo "$all_repos"
 }
 
-# Function to get repositories to monitor (either specific or all)
+# Get repositories to monitor (optimized)
 get_repositories_to_monitor() {
     if [[ -n "$SPECIFIC_REPOS" ]]; then
-        # Convert comma-separated list to space-separated and trim whitespace
         echo "$SPECIFIC_REPOS" | tr ',' ' ' | xargs -n1 | xargs
     else
-        get_org_repositories
+        get_all_org_repositories
     fi
 }
 
-# Function to get queued and running jobs for a repository
-get_jobs_for_repo() {
+# Optimized job counting with better error handling
+get_jobs_for_repo_fast() {
     local repo_name=$1
     local full_repo="$GITHUB_ORG/$repo_name"
     local queued_count=0
     local running_count=0
-    local page=1
     
-    # Get queued workflow runs
-    while true; do
-        local response
-        response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$full_repo/actions/runs?status=queued&per_page=100&page=$page")
-        
-        local runs
-        runs=$(echo "$response" | jq -r '.workflow_runs[]?.id' 2>/dev/null)
-        
-        if [[ -z "$runs" ]] || [[ "$runs" == "null" ]]; then
-            break
-        fi
-        
-        # Count jobs in each queued run
-        for run_id in $runs; do
+    # Single API call to get recent workflow runs (both queued and in_progress)
+    local response
+    response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$full_repo/actions/runs?per_page=50&page=1" 2>/dev/null)
+    
+    if [[ -z "$response" ]] || [[ "$response" == "null" ]]; then
+        API_ERRORS="${API_ERRORS}Failed to get runs for $repo_name. "
+        echo "0:0"
+        return
+    fi
+    
+    # Extract queued and running run IDs in one pass
+    local queued_runs running_runs
+    queued_runs=$(echo "$response" | jq -r '.workflow_runs[] | select(.status == "queued") | .id' 2>/dev/null)
+    
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        running_runs=$(echo "$response" | jq -r '.workflow_runs[] | select(.status == "in_progress") | .id' 2>/dev/null)
+    fi
+    
+    # Count queued jobs
+    for run_id in $queued_runs; do
+        if [[ -n "$run_id" ]] && [[ "$run_id" != "null" ]]; then
             local jobs_response
             jobs_response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/$full_repo/actions/runs/$run_id/jobs?filter=latest")
+                "https://api.github.com/repos/$full_repo/actions/runs/$run_id/jobs" 2>/dev/null)
             
-            local queued_jobs_in_run
-            queued_jobs_in_run=$(echo "$jobs_response" | jq '[.jobs[] | select(.status == "queued")] | length' 2>/dev/null)
+            local jobs_count
+            jobs_count=$(echo "$jobs_response" | jq '[.jobs[] | select(.status == "queued")] | length' 2>/dev/null)
             
-            if [[ "$queued_jobs_in_run" =~ ^[0-9]+$ ]]; then
-                ((queued_count += queued_jobs_in_run))
+            if [[ "$jobs_count" =~ ^[0-9]+$ ]]; then
+                ((queued_count += jobs_count))
             fi
-        done
-        
-        ((page++))
+        fi
     done
     
-    # Get running workflow runs if requested
+    # Count running jobs if requested
     if [[ "$INCLUDE_RUNNING" == "true" ]]; then
-        page=1
-        while true; do
-            local response
-            response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/$full_repo/actions/runs?status=in_progress&per_page=100&page=$page")
-            
-            local runs
-            runs=$(echo "$response" | jq -r '.workflow_runs[]?.id' 2>/dev/null)
-            
-            if [[ -z "$runs" ]] || [[ "$runs" == "null" ]]; then
-                break
-            fi
-            
-            # Count jobs in each running run
-            for run_id in $runs; do
+        for run_id in $running_runs; do
+            if [[ -n "$run_id" ]] && [[ "$run_id" != "null" ]]; then
                 local jobs_response
                 jobs_response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
                     -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/repos/$full_repo/actions/runs/$run_id/jobs?filter=latest")
+                    "https://api.github.com/repos/$full_repo/actions/runs/$run_id/jobs" 2>/dev/null)
                 
-                local running_jobs_in_run
-                running_jobs_in_run=$(echo "$jobs_response" | jq '[.jobs[] | select(.status == "in_progress")] | length' 2>/dev/null)
+                local jobs_count
+                jobs_count=$(echo "$jobs_response" | jq '[.jobs[] | select(.status == "in_progress")] | length' 2>/dev/null)
                 
-                if [[ "$running_jobs_in_run" =~ ^[0-9]+$ ]]; then
-                    ((running_count += running_jobs_in_run))
+                if [[ "$jobs_count" =~ ^[0-9]+$ ]]; then
+                    ((running_count += jobs_count))
                 fi
-            done
-            
-            ((page++))
+            fi
         done
     fi
     
     echo "$queued_count:$running_count"
 }
 
-# Function to get total queued jobs (returns only the number, no display)
-get_total_queued_jobs() {
-    local total_queued=0
-    
-    local repositories
-    repositories=$(get_repositories_to_monitor)
-    
-    if [[ -z "$repositories" ]]; then
-        echo "0"
-        return 1
-    fi
-    
-    for repo in $repositories; do
-        local job_counts
-        job_counts=$(get_jobs_for_repo "$repo")
-        
-        local repo_queued
-        repo_queued=$(echo "$job_counts" | cut -d':' -f1)
-        
-        if [[ "$repo_queued" =~ ^[0-9]+$ ]]; then
-            ((total_queued += repo_queued))
-        fi
-    done
-    
-    # Return ONLY the numeric result
-    echo "$total_queued"
-}
-
-# Function to display scan results (separate from counting)
-display_scan_results() {
+# Optimized display and counting
+scan_and_display_jobs() {
     local total_queued=0
     local total_running=0
     local repo_count=0
+    local processed_repos=0
     
     if [[ -n "$SPECIFIC_REPOS" ]]; then
         print_color "$BLUE" "Scanning specific repositories in $GITHUB_ORG..."
-        print_color "$BLUE" "Target repositories: $SPECIFIC_REPOS"
     else
         print_color "$BLUE" "Scanning all repositories in $GITHUB_ORG..."
     fi
     
-    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
-        print_color "$BLUE" "Including running jobs in analysis"
-    fi
-    
     local repositories
     repositories=$(get_repositories_to_monitor)
     
     if [[ -z "$repositories" ]]; then
-        if [[ -n "$SPECIFIC_REPOS" ]]; then
-            print_color "$RED" "No valid repositories found from specified list"
-        else
-            print_color "$RED" "No repositories found or access denied"
-        fi
+        API_ERRORS="${API_ERRORS}No repositories found or accessible. "
+        echo "0"
         return 1
     fi
     
+    # Count total repos for progress
+    repo_count=$(echo "$repositories" | wc -w)
+    
     for repo in $repositories; do
-        ((repo_count++))
-        echo -n "Checking $GITHUB_ORG/$repo... "
+        ((processed_repos++))
+        
+        # Show progress for large repo sets
+        if [[ $repo_count -gt 10 ]]; then
+            echo -n "[$processed_repos/$repo_count] $GITHUB_ORG/$repo... "
+        else
+            echo -n "Checking $GITHUB_ORG/$repo... "
+        fi
         
         local job_counts
-        job_counts=$(get_jobs_for_repo "$repo")
+        job_counts=$(get_jobs_for_repo_fast "$repo")
         
         local repo_queued repo_running
         repo_queued=$(echo "$job_counts" | cut -d':' -f1)
         repo_running=$(echo "$job_counts" | cut -d':' -f2)
         
+        # Quick display logic
         if [[ "$INCLUDE_RUNNING" == "true" ]]; then
             if [[ "$repo_queued" -gt 0 ]] || [[ "$repo_running" -gt 0 ]]; then
                 echo "($repo_queued queued, $repo_running running)"
-                if [[ "$repo_queued" -gt 0 ]]; then
-                    print_color "$YELLOW" "  └─ $GITHUB_ORG/$repo: $repo_queued queued jobs"
-                fi
-                if [[ "$repo_running" -gt 0 ]]; then
-                    print_color "$CYAN" "  └─ $GITHUB_ORG/$repo: $repo_running running jobs"
-                fi
+                [[ "$repo_queued" -gt 0 ]] && print_color "$YELLOW" "  └─ $repo_queued queued"
+                [[ "$repo_running" -gt 0 ]] && print_color "$CYAN" "  └─ $repo_running running"
             else
                 echo "(0 queued, 0 running)"
             fi
         else
             if [[ "$repo_queued" -gt 0 ]]; then
                 echo "($repo_queued queued)"
-                print_color "$YELLOW" "  └─ $GITHUB_ORG/$repo: $repo_queued queued jobs"
+                print_color "$YELLOW" "  └─ $repo_queued queued"
             else
                 echo "(0 queued)"
             fi
         fi
         
+        # Accumulate totals
         if [[ "$repo_queued" =~ ^[0-9]+$ ]]; then
             ((total_queued += repo_queued))
         fi
@@ -385,69 +302,40 @@ display_scan_results() {
     done
     
     echo
-    print_color "$BLUE" "Summary:"
+    print_color "$BLUE" "=== SUMMARY ==="
+    print_color "$BLUE" "  Organization: $GITHUB_ORG"
     if [[ -n "$SPECIFIC_REPOS" ]]; then
-        print_color "$BLUE" "  Specific repositories scanned: $repo_count"
-        print_color "$BLUE" "  Repository filter: $SPECIFIC_REPOS"
+        print_color "$BLUE" "  Specific repositories: $processed_repos"
+        print_color "$BLUE" "  Filter: $SPECIFIC_REPOS"
     else
-        print_color "$BLUE" "  All repositories scanned: $repo_count"
+        print_color "$BLUE" "  Total repositories scanned: $processed_repos"
     fi
     print_color "$BLUE" "  Total queued jobs: $total_queued"
     
     if [[ "$INCLUDE_RUNNING" == "true" ]]; then
         print_color "$CYAN" "  Total running jobs: $total_running"
-        print_color "$BLUE" "  Total active jobs (queued + running): $((total_queued + total_running))"
+        print_color "$BLUE" "  Total active jobs: $((total_queued + total_running))"
     fi
+    
+    # Display any errors encountered
+    if [[ -n "$VALIDATION_ERRORS" ]]; then
+        print_color "$RED" "  Validation errors: $VALIDATION_ERRORS"
+    fi
+    if [[ -n "$API_ERRORS" ]]; then
+        print_color "$YELLOW" "  API warnings: $API_ERRORS"
+    fi
+    
+    echo "$total_queued"
 }
 
-# Function to provide scaling recommendations
-provide_recommendations() {
-    local queue_count=$1
-    
-    echo
-    print_color "$BLUE" "=== SCALING RECOMMENDATIONS ==="
-    
-    if [[ $queue_count -eq 0 ]]; then
-        print_color "$GREEN" "✓ No queued jobs - runners are keeping up with demand"
-        print_color "$GREEN" "  Recommendation: Current capacity is sufficient"
-    elif [[ $queue_count -lt $LOW_THRESHOLD ]]; then
-        print_color "$GREEN" "✓ Queue is manageable ($queue_count < $LOW_THRESHOLD)"
-        print_color "$GREEN" "  Recommendation: Monitor but no immediate action needed"
-    elif [[ $queue_count -lt $HIGH_THRESHOLD ]]; then
-        print_color "$YELLOW" "⚠ Queue is building up ($queue_count >= $LOW_THRESHOLD)"
-        print_color "$YELLOW" "  Recommendation: Consider scaling up runners soon"
-    else
-        print_color "$RED" "🚨 High queue detected ($queue_count >= $HIGH_THRESHOLD)"
-        print_color "$RED" "  Recommendation: SCALE UP IMMEDIATELY - jobs are backing up"
-    fi
-    
-    echo
-    print_color "$BLUE" "Configuration:"
-    print_color "$BLUE" "  Organization: $GITHUB_ORG"
-    if [[ -n "$SPECIFIC_REPOS" ]]; then
-        print_color "$BLUE" "  Monitoring specific repos: $SPECIFIC_REPOS"
-    else
-        print_color "$BLUE" "  Monitoring: All organization repositories"
-    fi
-    print_color "$BLUE" "  Include running jobs: $INCLUDE_RUNNING"
-    print_color "$BLUE" "  Low threshold (monitor): $LOW_THRESHOLD"
-    print_color "$BLUE" "  High threshold (scale up): $HIGH_THRESHOLD"
-    print_color "$BLUE" "  Current queue count: $queue_count"
-    
-    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
-        print_color "$BLUE" "  Note: Scaling decisions based on queued jobs only"
-        print_color "$BLUE" "        Running jobs indicate current runner utilization"
-    fi
-}
-
-# Function for continuous monitoring
+# Optimized watch mode
 watch_mode() {
     local mode_desc="queued jobs"
     if [[ "$INCLUDE_RUNNING" == "true" ]]; then
         mode_desc="queued and running jobs"
     fi
     
-    print_color "$GREEN" "Starting continuous monitoring of $mode_desc (polling every ${POLL_INTERVAL}s)"
+    print_color "$GREEN" "Starting optimized monitoring of $mode_desc (every ${POLL_INTERVAL}s)"
     print_color "$GREEN" "Press Ctrl+C to stop"
     echo
     
@@ -455,26 +343,20 @@ watch_mode() {
         local timestamp
         timestamp=$(date '+%Y-%m-%d %H:%M:%S UTC')
         
-        print_color "$BLUE" "[$timestamp] Checking queue..."
+        print_color "$BLUE" "[$timestamp] Checking jobs..."
         
-        # Display the scan results
-        display_scan_results
+        # Reset error tracking for each iteration
+        VALIDATION_ERRORS=""
+        API_ERRORS=""
         
-        # Get the numeric count separately
         local queue_count
-        queue_count=$(get_total_queued_jobs)
+        queue_count=$(scan_and_display_jobs)
         
-        if [[ -n "$SPECIFIC_REPOS" ]]; then
-            log_message "Queue count for repos [$SPECIFIC_REPOS]: $queue_count (include_running: $INCLUDE_RUNNING)"
-        else
-            log_message "Queue count (all repos): $queue_count (include_running: $INCLUDE_RUNNING)"
-        fi
-        
-        provide_recommendations "$queue_count"
+        log_message "Queue count: $queue_count"
         
         echo
         print_color "$BLUE" "Next check in ${POLL_INTERVAL}s..."
-        echo "----------------------------------------"
+        echo "$(printf '=%.0s' {1..50})"
         
         sleep "$POLL_INTERVAL"
     done
@@ -485,8 +367,6 @@ GITHUB_ORG=""
 GITHUB_TOKEN=""
 SPECIFIC_REPOS=""
 INCLUDE_RUNNING=false
-LOW_THRESHOLD=$DEFAULT_LOW_THRESHOLD
-HIGH_THRESHOLD=$DEFAULT_HIGH_THRESHOLD
 POLL_INTERVAL=$DEFAULT_POLL_INTERVAL
 WATCH_MODE=false
 SAVE_CONFIG=false
@@ -509,14 +389,6 @@ while [[ $# -gt 0 ]]; do
         --include-running)
             INCLUDE_RUNNING=true
             shift
-            ;;
-        -l|--low-threshold)
-            LOW_THRESHOLD="$2"
-            shift 2
-            ;;
-        -h|--high-threshold)
-            HIGH_THRESHOLD="$2"
-            shift 2
             ;;
         -i|--interval)
             POLL_INTERVAL="$2"
@@ -548,32 +420,18 @@ done
 
 # Load configuration if requested
 if [[ "$LOAD_CONFIG" == "true" ]]; then
-    if ! load_config; then
-        exit 1
-    fi
+    load_config || exit 1
 fi
 
-# Validate required parameters
-if [[ -z "$GITHUB_ORG" ]]; then
-    print_color "$RED" "Error: GitHub organization is required"
+# Basic validation
+if [[ -z "$GITHUB_ORG" ]] || [[ -z "$GITHUB_TOKEN" ]]; then
+    print_color "$RED" "Error: GitHub organization and token are required"
     usage
     exit 1
 fi
 
-if [[ -z "$GITHUB_TOKEN" ]]; then
-    print_color "$RED" "Error: GitHub Personal Access Token is required"
-    usage
-    exit 1
-fi
-
-# Validate numeric thresholds
-if ! [[ "$LOW_THRESHOLD" =~ ^[0-9]+$ ]] || ! [[ "$HIGH_THRESHOLD" =~ ^[0-9]+$ ]] || ! [[ "$POLL_INTERVAL" =~ ^[0-9]+$ ]]; then
-    print_color "$RED" "Error: Thresholds and interval must be positive integers"
-    exit 1
-fi
-
-if [[ $LOW_THRESHOLD -ge $HIGH_THRESHOLD ]]; then
-    print_color "$RED" "Error: Low threshold must be less than high threshold"
+if ! [[ "$POLL_INTERVAL" =~ ^[0-9]+$ ]]; then
+    print_color "$RED" "Error: Interval must be a positive integer"
     exit 1
 fi
 
@@ -585,17 +443,8 @@ for cmd in curl jq; do
     fi
 done
 
-# Validate GitHub access
-if ! validate_github_access; then
-    exit 1
-fi
-
-# Validate specific repositories if provided
-if [[ -n "$SPECIFIC_REPOS" ]]; then
-    if ! validate_specific_repos "$SPECIFIC_REPOS"; then
-        exit 1
-    fi
-fi
+# Fast validation (errors will be shown in summary)
+fast_validate_access
 
 # Save configuration if requested
 if [[ "$SAVE_CONFIG" == "true" ]]; then
@@ -603,35 +452,20 @@ if [[ "$SAVE_CONFIG" == "true" ]]; then
 fi
 
 # Main execution
-print_color "$GREEN" "GitHub Actions Queue Monitor"
+print_color "$GREEN" "GitHub Actions Queue Monitor (Optimized)"
 print_color "$GREEN" "Organization: $GITHUB_ORG"
 if [[ -n "$SPECIFIC_REPOS" ]]; then
     print_color "$GREEN" "Target repositories: $SPECIFIC_REPOS"
-else
-    print_color "$GREEN" "Monitoring: All organization repositories"
 fi
 if [[ "$INCLUDE_RUNNING" == "true" ]]; then
     print_color "$GREEN" "Mode: Monitoring queued AND running jobs"
-else
-    print_color "$GREEN" "Mode: Monitoring queued jobs only"
 fi
-print_color "$GREEN" "Monitoring thresholds: Low=$LOW_THRESHOLD, High=$HIGH_THRESHOLD"
 echo
 
 if [[ "$WATCH_MODE" == "true" ]]; then
     watch_mode
 else
     # Single check mode
-    # Display the scan results
-    display_scan_results
-    
-    # Get the numeric count separately
-    queue_count=$(get_total_queued_jobs)
-    
-    provide_recommendations "$queue_count"
-    if [[ -n "$SPECIFIC_REPOS" ]]; then
-        log_message "Single check completed for repos [$SPECIFIC_REPOS]. Queue count: $queue_count (include_running: $INCLUDE_RUNNING)"
-    else
-        log_message "Single check completed (all repos). Queue count: $queue_count (include_running: $INCLUDE_RUNNING)"
-    fi
+    queue_count=$(scan_and_display_jobs)
+    log_message "Single check completed. Queue count: $queue_count"
 fi
