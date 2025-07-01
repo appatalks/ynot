@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # GitHub Actions Queue Monitor for Self-Hosted Runners
+# Author: GitHub Copilot
 # Date: 2025-07-01
 # Purpose: Monitor pending jobs across an organization for auto-scaling decisions
 
@@ -11,6 +12,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
@@ -51,6 +53,7 @@ OPTIONS:
     -l, --low-threshold NUM     Low queue threshold (default: $DEFAULT_LOW_THRESHOLD)
     -h, --high-threshold NUM    High queue threshold (default: $DEFAULT_HIGH_THRESHOLD)
     -i, --interval SECONDS      Polling interval for watch mode (default: $DEFAULT_POLL_INTERVAL)
+    --include-running           Include running jobs in the analysis and display
     -w, --watch                 Continuous monitoring mode
     -s, --save-config           Save configuration for future use
     -c, --load-config           Load saved configuration
@@ -63,11 +66,14 @@ EXAMPLES:
     # Monitor specific repositories only
     $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx -r "webapp,api-service,worker"
 
-    # Continuous monitoring with custom thresholds and specific repos
-    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx -r "repo1,repo2" -l 10 -h 30 -w
+    # Include running jobs in the analysis
+    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx --include-running
 
-    # Save configuration for repeated use (including specific repos)
-    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx -r "critical-app,main-service" -s
+    # Continuous monitoring with custom thresholds and running jobs
+    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx -r "repo1,repo2" -l 10 -h 30 --include-running -w
+
+    # Save configuration for repeated use (including running jobs flag)
+    $0 -o myorg -t ghp_xxxxxxxxxxxxxxxxxxxx --include-running -s
 
     # Load saved config and watch
     $0 -c -w
@@ -76,6 +82,12 @@ REPOSITORY SPECIFICATION:
     - Use repository names only (not full owner/repo format)
     - Separate multiple repositories with commas (no spaces)
     - Example: -r "webapp,api,worker" not -r "myorg/webapp,myorg/api"
+
+RUNNING JOBS:
+    - When --include-running is used, running jobs are counted separately
+    - Running jobs help assess current runner utilization
+    - Total load = queued jobs + running jobs
+    - Thresholds still apply only to queued jobs for scaling decisions
 
 REQUIRED PERMISSIONS:
     Your PAT needs 'repo' and 'read:org' scopes for full access.
@@ -88,6 +100,7 @@ save_config() {
 GITHUB_ORG="$GITHUB_ORG"
 GITHUB_TOKEN="$GITHUB_TOKEN"
 SPECIFIC_REPOS="$SPECIFIC_REPOS"
+INCLUDE_RUNNING=$INCLUDE_RUNNING
 LOW_THRESHOLD=$LOW_THRESHOLD
 HIGH_THRESHOLD=$HIGH_THRESHOLD
 POLL_INTERVAL=$POLL_INTERVAL
@@ -196,13 +209,15 @@ get_repositories_to_monitor() {
     fi
 }
 
-# Function to get queued jobs for a repository
-get_queued_jobs_for_repo() {
+# Function to get queued and running jobs for a repository
+get_jobs_for_repo() {
     local repo_name=$1
     local full_repo="$GITHUB_ORG/$repo_name"
     local queued_count=0
+    local running_count=0
     local page=1
     
+    # Get queued workflow runs
     while true; do
         local response
         response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -216,7 +231,7 @@ get_queued_jobs_for_repo() {
             break
         fi
         
-        # Count jobs in each run
+        # Count jobs in each queued run
         for run_id in $runs; do
             local jobs_response
             jobs_response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -234,7 +249,42 @@ get_queued_jobs_for_repo() {
         ((page++))
     done
     
-    echo "$queued_count"
+    # Get running workflow runs if requested
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        page=1
+        while true; do
+            local response
+            response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$full_repo/actions/runs?status=in_progress&per_page=100&page=$page")
+            
+            local runs
+            runs=$(echo "$response" | jq -r '.workflow_runs[]?.id' 2>/dev/null)
+            
+            if [[ -z "$runs" ]] || [[ "$runs" == "null" ]]; then
+                break
+            fi
+            
+            # Count jobs in each running run
+            for run_id in $runs; do
+                local jobs_response
+                jobs_response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/repos/$full_repo/actions/runs/$run_id/jobs?filter=latest")
+                
+                local running_jobs_in_run
+                running_jobs_in_run=$(echo "$jobs_response" | jq '[.jobs[] | select(.status == "in_progress")] | length' 2>/dev/null)
+                
+                if [[ "$running_jobs_in_run" =~ ^[0-9]+$ ]]; then
+                    ((running_count += running_jobs_in_run))
+                fi
+            done
+            
+            ((page++))
+        done
+    fi
+    
+    echo "$queued_count:$running_count"
 }
 
 # Function to get total queued jobs (returns only the number, no display)
@@ -250,8 +300,11 @@ get_total_queued_jobs() {
     fi
     
     for repo in $repositories; do
+        local job_counts
+        job_counts=$(get_jobs_for_repo "$repo")
+        
         local repo_queued
-        repo_queued=$(get_queued_jobs_for_repo "$repo")
+        repo_queued=$(echo "$job_counts" | cut -d':' -f1)
         
         if [[ "$repo_queued" =~ ^[0-9]+$ ]]; then
             ((total_queued += repo_queued))
@@ -265,6 +318,7 @@ get_total_queued_jobs() {
 # Function to display scan results (separate from counting)
 display_scan_results() {
     local total_queued=0
+    local total_running=0
     local repo_count=0
     
     if [[ -n "$SPECIFIC_REPOS" ]]; then
@@ -272,6 +326,10 @@ display_scan_results() {
         print_color "$BLUE" "Target repositories: $SPECIFIC_REPOS"
     else
         print_color "$BLUE" "Scanning all repositories in $GITHUB_ORG..."
+    fi
+    
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        print_color "$BLUE" "Including running jobs in analysis"
     fi
     
     local repositories
@@ -290,18 +348,39 @@ display_scan_results() {
         ((repo_count++))
         echo -n "Checking $GITHUB_ORG/$repo... "
         
-        local repo_queued
-        repo_queued=$(get_queued_jobs_for_repo "$repo")
+        local job_counts
+        job_counts=$(get_jobs_for_repo "$repo")
         
-        if [[ "$repo_queued" -gt 0 ]]; then
-            echo "($repo_queued queued)"
-            print_color "$YELLOW" "  └─ $GITHUB_ORG/$repo: $repo_queued queued jobs"
+        local repo_queued repo_running
+        repo_queued=$(echo "$job_counts" | cut -d':' -f1)
+        repo_running=$(echo "$job_counts" | cut -d':' -f2)
+        
+        if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+            if [[ "$repo_queued" -gt 0 ]] || [[ "$repo_running" -gt 0 ]]; then
+                echo "($repo_queued queued, $repo_running running)"
+                if [[ "$repo_queued" -gt 0 ]]; then
+                    print_color "$YELLOW" "  └─ $GITHUB_ORG/$repo: $repo_queued queued jobs"
+                fi
+                if [[ "$repo_running" -gt 0 ]]; then
+                    print_color "$CYAN" "  └─ $GITHUB_ORG/$repo: $repo_running running jobs"
+                fi
+            else
+                echo "(0 queued, 0 running)"
+            fi
         else
-            echo "(0 queued)"
+            if [[ "$repo_queued" -gt 0 ]]; then
+                echo "($repo_queued queued)"
+                print_color "$YELLOW" "  └─ $GITHUB_ORG/$repo: $repo_queued queued jobs"
+            else
+                echo "(0 queued)"
+            fi
         fi
         
         if [[ "$repo_queued" =~ ^[0-9]+$ ]]; then
             ((total_queued += repo_queued))
+        fi
+        if [[ "$repo_running" =~ ^[0-9]+$ ]]; then
+            ((total_running += repo_running))
         fi
     done
     
@@ -314,6 +393,11 @@ display_scan_results() {
         print_color "$BLUE" "  All repositories scanned: $repo_count"
     fi
     print_color "$BLUE" "  Total queued jobs: $total_queued"
+    
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        print_color "$CYAN" "  Total running jobs: $total_running"
+        print_color "$BLUE" "  Total active jobs (queued + running): $((total_queued + total_running))"
+    fi
 }
 
 # Function to provide scaling recommendations
@@ -345,14 +429,25 @@ provide_recommendations() {
     else
         print_color "$BLUE" "  Monitoring: All organization repositories"
     fi
+    print_color "$BLUE" "  Include running jobs: $INCLUDE_RUNNING"
     print_color "$BLUE" "  Low threshold (monitor): $LOW_THRESHOLD"
     print_color "$BLUE" "  High threshold (scale up): $HIGH_THRESHOLD"
     print_color "$BLUE" "  Current queue count: $queue_count"
+    
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        print_color "$BLUE" "  Note: Scaling decisions based on queued jobs only"
+        print_color "$BLUE" "        Running jobs indicate current runner utilization"
+    fi
 }
 
 # Function for continuous monitoring
 watch_mode() {
-    print_color "$GREEN" "Starting continuous monitoring (polling every ${POLL_INTERVAL}s)"
+    local mode_desc="queued jobs"
+    if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+        mode_desc="queued and running jobs"
+    fi
+    
+    print_color "$GREEN" "Starting continuous monitoring of $mode_desc (polling every ${POLL_INTERVAL}s)"
     print_color "$GREEN" "Press Ctrl+C to stop"
     echo
     
@@ -370,9 +465,9 @@ watch_mode() {
         queue_count=$(get_total_queued_jobs)
         
         if [[ -n "$SPECIFIC_REPOS" ]]; then
-            log_message "Queue count for repos [$SPECIFIC_REPOS]: $queue_count"
+            log_message "Queue count for repos [$SPECIFIC_REPOS]: $queue_count (include_running: $INCLUDE_RUNNING)"
         else
-            log_message "Queue count (all repos): $queue_count"
+            log_message "Queue count (all repos): $queue_count (include_running: $INCLUDE_RUNNING)"
         fi
         
         provide_recommendations "$queue_count"
@@ -389,6 +484,7 @@ watch_mode() {
 GITHUB_ORG=""
 GITHUB_TOKEN=""
 SPECIFIC_REPOS=""
+INCLUDE_RUNNING=false
 LOW_THRESHOLD=$DEFAULT_LOW_THRESHOLD
 HIGH_THRESHOLD=$DEFAULT_HIGH_THRESHOLD
 POLL_INTERVAL=$DEFAULT_POLL_INTERVAL
@@ -409,6 +505,10 @@ while [[ $# -gt 0 ]]; do
         -r|--repos)
             SPECIFIC_REPOS="$2"
             shift 2
+            ;;
+        --include-running)
+            INCLUDE_RUNNING=true
+            shift
             ;;
         -l|--low-threshold)
             LOW_THRESHOLD="$2"
@@ -510,6 +610,11 @@ if [[ -n "$SPECIFIC_REPOS" ]]; then
 else
     print_color "$GREEN" "Monitoring: All organization repositories"
 fi
+if [[ "$INCLUDE_RUNNING" == "true" ]]; then
+    print_color "$GREEN" "Mode: Monitoring queued AND running jobs"
+else
+    print_color "$GREEN" "Mode: Monitoring queued jobs only"
+fi
 print_color "$GREEN" "Monitoring thresholds: Low=$LOW_THRESHOLD, High=$HIGH_THRESHOLD"
 echo
 
@@ -525,8 +630,8 @@ else
     
     provide_recommendations "$queue_count"
     if [[ -n "$SPECIFIC_REPOS" ]]; then
-        log_message "Single check completed for repos [$SPECIFIC_REPOS]. Queue count: $queue_count"
+        log_message "Single check completed for repos [$SPECIFIC_REPOS]. Queue count: $queue_count (include_running: $INCLUDE_RUNNING)"
     else
-        log_message "Single check completed (all repos). Queue count: $queue_count"
+        log_message "Single check completed (all repos). Queue count: $queue_count (include_running: $INCLUDE_RUNNING)"
     fi
 fi
