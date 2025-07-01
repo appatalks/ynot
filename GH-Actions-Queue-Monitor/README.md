@@ -60,12 +60,12 @@ This tool helps organizations using self-hosted GitHub Actions runners to:
 
 ### Single Organization Scan
 ```bash
-./github-actions-queue-monitor.sh -o "mycompany" -t "ghp_xxxxxxxxxxxxxxxxxxxx"
+./gha-jobs-queue-monitor.sh -o "mycompany" -t "ghp_xxxxxxxxxxxxxxxxxxxx"
 ```
 
 ### Monitor Critical Repositories Only
 ```bash
-./github-actions-queue-monitor.sh \
+./gha-jobs-queue-monitor.sh \
   -o "mycompany" \
   -t "ghp_xxxx" \
   -r "frontend,backend,api-gateway,payment-service"
@@ -73,7 +73,7 @@ This tool helps organizations using self-hosted GitHub Actions runners to:
 
 ### Full Monitoring with Running Jobs
 ```bash
-./github-actions-queue-monitor.sh \
+./gha-jobs-queue-monitor.sh \
   -o "mycompany" \
   -t "ghp_xxxx" \
   --include-running \
@@ -84,7 +84,7 @@ This tool helps organizations using self-hosted GitHub Actions runners to:
 ### Save Configuration for Repeated Use
 ```bash
 # Save configuration
-./github-actions-queue-monitor.sh \
+./gha-jobs-queue-monitor.sh \
   -o "mycompany" \
   -t "ghp_xxxx" \
   -r "critical-app,main-service" \
@@ -92,7 +92,7 @@ This tool helps organizations using self-hosted GitHub Actions runners to:
   -s
 
 # Later, use saved configuration
-./github-actions-queue-monitor.sh -c -w
+./gha-jobs-queue-monitor.sh -c -w
 ```
 
 ## Sample Output
