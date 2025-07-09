@@ -41,6 +41,16 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 TMP=$(mktemp -d)
 cd "$TMP" || exit 1
 
+# Set up persistent cache directory for downloaded files
+if [[ "${BLOB_CACHE_ENABLED}" == "true" ]]; then
+  CACHE_DIR="${HOME}/.chaos-engine-cache"
+  mkdir -p "$CACHE_DIR/images" "$CACHE_DIR/archives"
+  echo "📦 Using cache directory: $CACHE_DIR"
+else
+  CACHE_DIR=""
+  echo "📦 Caching disabled - files will be downloaded fresh each time"
+fi
+
 # Load global configuration
 source "$ROOT_DIR/config.env"
 
@@ -49,6 +59,8 @@ source "$ROOT_DIR/config.env"
 : "${BLOB_MIN_SIZE:=1}"     # Default min size is 1 MB
 : "${BLOB_MAX_SIZE:=10}"    # Default max size is 10 MB
 : "${BLOB_REPOS_COUNT:=3}"  # Default number of repositories to add blobs to
+: "${BLOB_CACHE_ENABLED:=true}"  # Enable caching by default
+: "${BLOB_CACHE_MAX_AGE:=7}"     # Cache cleanup age in days
 
 # Check if blobs should be added
 if [[ "$DATA_BLOBS" != "true" ]]; then
@@ -110,6 +122,10 @@ TOTAL_REPOS=${#ALL_REPOS[@]}
 REPOS_TO_ADD=$((BLOB_REPOS_COUNT < TOTAL_REPOS ? BLOB_REPOS_COUNT : TOTAL_REPOS))
 
 echo "Will add blob data to ${REPOS_TO_ADD} repositories."
+
+# Clean old cache files and show cache stats
+clean_cache  # Uses BLOB_CACHE_MAX_AGE from config
+show_cache_stats
 
 # Function to download files from GitHub
 download_github_files() {
@@ -209,12 +225,13 @@ download_github_files() {
     fi
     
     local filename=$(basename "$url")
-    echo "Downloading $filename..."
-    curl -s -L "$url" -o "${output_dir}/${filename}"
-    download_count=$((download_count + 1))
+    # Use cached download function
+    if download_and_cache "$url" "images" "$filename" "$output_dir"; then
+      download_count=$((download_count + 1))
+    fi
   done
   
-  echo "Downloaded ${download_count} files to ${output_dir}"
+  echo "Downloaded/cached ${download_count} files to ${output_dir}"
 }
 
 # Function to generate a random file of specified size in MB
@@ -232,6 +249,112 @@ random_size() {
   local min="$1"
   local max="$2"
   echo $(( min + RANDOM % (max - min + 1) ))
+}
+
+# Cache utility functions
+get_cache_key() {
+  local url="$1"
+  # Create a simple cache key from URL (replace special chars with underscores)
+  echo "$url" | sed 's|[^a-zA-Z0-9._-]|_|g' | cut -c1-200
+}
+
+copy_from_cache() {
+  local cache_file="$1"
+  local destination="$2"
+  local filename="$3"
+  
+  if [[ -f "$cache_file" && -s "$cache_file" ]]; then
+    echo "📋 Copying ${filename} from cache..."
+    cp "$cache_file" "${destination}/${filename}"
+    return 0
+  fi
+  return 1
+}
+
+download_and_cache() {
+  local url="$1"
+  local cache_subdir="$2"  # "images" or "archives"
+  local filename="$3"
+  local destination="$4"
+  
+  mkdir -p "$destination"
+  
+  # If caching is disabled, download directly
+  if [[ "${BLOB_CACHE_ENABLED}" != "true" ]] || [[ -z "$CACHE_DIR" ]]; then
+    echo "⬇️ Downloading ${filename}..."
+    if curl -s -L -o "${destination}/${filename}" "$url"; then
+      if [[ -s "${destination}/${filename}" ]]; then
+        echo "✅ Downloaded ${filename}"
+        return 0
+      else
+        echo "⚠️ Downloaded file is empty"
+        rm -f "${destination}/${filename}"
+        return 1
+      fi
+    else
+      echo "⚠️ Failed to download ${filename}"
+      return 1
+    fi
+  fi
+  
+  # Caching is enabled
+  local cache_key=$(get_cache_key "$url")
+  local cache_file="${CACHE_DIR}/${cache_subdir}/${cache_key}_${filename}"
+  
+  # Try to copy from cache first
+  if copy_from_cache "$cache_file" "$destination" "$filename"; then
+    return 0
+  fi
+  
+  # Download and cache the file
+  echo "⬇️ Downloading and caching ${filename}..."
+  mkdir -p "${CACHE_DIR}/${cache_subdir}"
+  
+  if curl -s -L -o "$cache_file" "$url"; then
+    # Verify the downloaded file has content
+    if [[ -s "$cache_file" ]]; then
+      echo "✅ Downloaded and cached ${filename}"
+      # Copy from cache to destination
+      cp "$cache_file" "${destination}/${filename}"
+      return 0
+    else
+      echo "⚠️ Downloaded file is empty, removing from cache"
+      rm -f "$cache_file"
+      return 1
+    fi
+  else
+    echo "⚠️ Failed to download ${filename}"
+    rm -f "$cache_file"
+    return 1
+  fi
+}
+
+clean_cache() {
+  if [[ "${BLOB_CACHE_ENABLED}" != "true" ]] || [[ -z "$CACHE_DIR" ]]; then
+    return 0
+  fi
+  
+  local max_age_days="${1:-${BLOB_CACHE_MAX_AGE}}"
+  echo "🧹 Cleaning cache files older than ${max_age_days} days..."
+  find "$CACHE_DIR" -type f -mtime +${max_age_days} -delete 2>/dev/null || true
+  
+  # Clean empty directories
+  find "$CACHE_DIR" -type d -empty -delete 2>/dev/null || true
+}
+
+show_cache_stats() {
+  if [[ "${BLOB_CACHE_ENABLED}" != "true" ]] || [[ -z "$CACHE_DIR" ]]; then
+    echo "📊 Cache is disabled"
+    return 0
+  fi
+  
+  if [[ -d "$CACHE_DIR" ]]; then
+    local file_count=$(find "$CACHE_DIR" -type f | wc -l)
+    local cache_size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+    echo "📊 Cache stats: ${file_count} files, ${cache_size} total size"
+  else
+    echo "📊 Cache directory not found"
+  fi
 }
 
 # Initialize array to track processed repositories
@@ -429,15 +552,14 @@ for ((i=0; i<REPOS_TO_ADD; i++)); do
     local output_dir="$2"
     local filename="$3"
     
-    mkdir -p "$output_dir"
-    echo "Downloading $filename from direct URL..."
-    if curl -s -L -o "${output_dir}/${filename}" "$url"; then
-      echo "✅ Downloaded ${filename} successfully"
-      return 0
-    else
-      echo "⚠️ Failed to download ${filename}"
-      return 1
+    # Determine cache subdirectory based on file extension or output directory
+    local cache_subdir="images"
+    if [[ "$output_dir" == *"archives"* ]] || [[ "$filename" == *.tar.gz ]] || [[ "$filename" == *.zip ]] || [[ "$filename" == *.gz ]]; then
+      cache_subdir="archives"
     fi
+    
+    # Use the cached download function
+    download_and_cache "$url" "$cache_subdir" "$filename" "$output_dir"
   }
   
   # Create media directories
@@ -723,5 +845,9 @@ echo "✅ Blob data branches created: $BRANCH_COUNT"
 echo "✅ Pull requests created: $PR_COUNT"
 echo "✅ Target data size range: ${BLOB_MIN_SIZE}MB - ${BLOB_MAX_SIZE}MB per repository"
 echo -e "\nTemporary workspace: $TMP (can be safely removed)"
+
+# Show final cache statistics
+echo ""
+show_cache_stats
 
 echo -e "\n✅ create-blob-data module complete!"
