@@ -274,66 +274,145 @@ for ((i=0; i<REPOS_TO_ADD; i++)); do
   
   echo -e "\n🔍 Processing repository: ${ORG}/${REPO_NAME}"
   
+  # Check if repository exists and is accessible via API
+  REPO_CHECK=$(curl -k -s -X GET -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}")
+  if ! echo "$REPO_CHECK" | jq -e '.id' > /dev/null; then
+    echo "❌ Repository ${ORG}/${REPO_NAME} is not accessible via API. Skipping..."
+    continue
+  fi
+  
   # Create a working directory for this repo
   REPO_DIR="${TMP}/${REPO_NAME}"
   mkdir -p "$REPO_DIR"
   
   # Clone the repository
   echo "Cloning repository..."
-  if ! git clone "https://x-access-token:${GITHUB_TOKEN}@${GIT_URL_PREFIX#https://}/${ORG}/${REPO_NAME}.git" "$REPO_DIR"; then
-    echo "❌ Failed to clone repository ${ORG}/${REPO_NAME}. Skipping..."
+  
+  # Set git timeout and retry settings
+  git config --global http.lowSpeedLimit 1000
+  git config --global http.lowSpeedTime 30
+  git config --global http.postBuffer 524288000
+  
+  # Try to clone with retry handling
+  CLONE_SUCCESS=false
+  for ((clone_attempt=1; clone_attempt<=3; clone_attempt++)); do
+    echo "Clone attempt $clone_attempt of 3..."
+    # Use git's built-in timeout settings instead of external timeout command
+    if git clone --config http.lowSpeedTime=60 --config http.lowSpeedLimit=1000 "https://x-access-token:${GITHUB_TOKEN}@${GIT_URL_PREFIX#https://}/${ORG}/${REPO_NAME}.git" "$REPO_DIR"; then
+      CLONE_SUCCESS=true
+      break
+    else
+      echo "⚠️ Clone attempt $clone_attempt failed."
+      if [[ $clone_attempt -lt 3 ]]; then
+        echo "Waiting 5 seconds before retry..."
+        sleep 5
+        # Clean up any partial clone
+        rm -rf "$REPO_DIR"
+        mkdir -p "$REPO_DIR"
+      fi
+    fi
+  done
+  
+  if [[ "$CLONE_SUCCESS" != "true" ]]; then
+    echo "❌ Failed to clone repository ${ORG}/${REPO_NAME} after 3 attempts. Skipping..."
     continue
   fi
+  
   cd "$REPO_DIR" || continue
   
   # Create a new branch
   BRANCH_NAME="blob-data-$(date +%s)"
   
-  # Try to determine the default branch
-  echo "Determining default branch..."
-  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "")
-  
-  if [[ -z "$DEFAULT_BRANCH" ]]; then
-    echo "Could not determine default branch from git config. Checking common branches..."
+  # Check if this is an empty repository (no commits)
+  if ! git log --oneline -1 > /dev/null 2>&1; then
+    echo "📝 Repository appears to be empty (no commits). Initializing with first commit..."
     
-    # Try common branch names
-    for branch in main master develop trunk; do
-      if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-        DEFAULT_BRANCH="$branch"
-        echo "Found branch: $DEFAULT_BRANCH"
-        break
-      fi
-    done
+    # Get the default branch name from the API or use 'main' as fallback
+    REPO_INFO=$(curl -k -s -X GET -H "$AUTH" "$API/repos/${ORG}/${REPO_NAME}")
+    if echo "$REPO_INFO" | jq -e '.default_branch' > /dev/null; then
+      DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch')
+      echo "Default branch from API: $DEFAULT_BRANCH"
+    else
+      DEFAULT_BRANCH="main"
+      echo "Using fallback default branch: $DEFAULT_BRANCH"
+    fi
     
-    # If still no default branch, list all branches and use the first one
+    # Configure git user for this repo
+    git config user.email "chaos-engine@example.com"
+    git config user.name "Chaos Engine"
+    
+    # Create initial commit on the default branch
+    echo "# ${REPO_NAME}" > README.md
+    echo "" >> README.md
+    echo "This repository was initialized by the Chaos Engine testing suite." >> README.md
+    echo "Created on: $(date)" >> README.md
+    
+    git add README.md
+    git commit -m "Initial commit - Repository initialized by Chaos Engine"
+    
+    # Push the initial commit to establish the default branch
+    echo "Pushing initial commit to establish default branch..."
+    if ! git push -u origin "$DEFAULT_BRANCH"; then
+      echo "❌ Failed to push initial commit. Skipping..."
+      cd "$TMP" || exit 1
+      continue
+    fi
+    
+    # Now create and checkout the blob data branch
+    if ! git checkout -b "$BRANCH_NAME"; then
+      echo "❌ Failed to create branch ${BRANCH_NAME}. Skipping..."
+      cd "$TMP" || exit 1
+      continue
+    fi
+    
+  else
+    # Repository has commits, proceed with normal branch detection
+    echo "Determining default branch..."
+    DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "")
+    
     if [[ -z "$DEFAULT_BRANCH" ]]; then
-      echo "Could not find common branch names. Listing all branches..."
-      ALL_BRANCHES=($(git branch -r | grep -v HEAD | sed 's/origin\///'))
-      if [[ ${#ALL_BRANCHES[@]} -gt 0 ]]; then
-        DEFAULT_BRANCH="${ALL_BRANCHES[0]}"
-        echo "Using first available branch: $DEFAULT_BRANCH"
-      else
-        echo "❌ No branches found in the repository. Skipping..."
-        cd "$TMP" || exit 1
-        continue
+      echo "Could not determine default branch from git config. Checking common branches..."
+      
+      # Try common branch names
+      for branch in main master develop trunk; do
+        if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+          DEFAULT_BRANCH="$branch"
+          echo "Found branch: $DEFAULT_BRANCH"
+          break
+        fi
+      done
+      
+      # If still no default branch, list all branches and use the first one
+      if [[ -z "$DEFAULT_BRANCH" ]]; then
+        echo "Could not find common branch names. Listing all branches..."
+        # Get all remote branches, clean up the output, and filter out HEAD
+        ALL_BRANCHES=($(git branch -r 2>/dev/null | grep -v HEAD | sed 's/origin\///' | sed 's/^[[:space:]]*//' | head -10))
+        if [[ ${#ALL_BRANCHES[@]} -gt 0 ]]; then
+          DEFAULT_BRANCH="${ALL_BRANCHES[0]}"
+          echo "Using first available branch: $DEFAULT_BRANCH"
+        else
+          echo "❌ No remote branches found. Repository may be corrupted or inaccessible. Skipping..."
+          cd "$TMP" || exit 1
+          continue
+        fi
       fi
     fi
-  fi
-  
-  echo "Using default branch: $DEFAULT_BRANCH"
-  
-  # Checkout the default branch
-  if ! git checkout "$DEFAULT_BRANCH"; then
-    echo "❌ Failed to checkout the default branch ${DEFAULT_BRANCH}. Skipping..."
-    cd "$TMP" || exit 1
-    continue
-  fi
-  
-  # Create and checkout the new branch
-  if ! git checkout -b "$BRANCH_NAME"; then
-    echo "❌ Failed to create branch ${BRANCH_NAME}. Skipping..."
-    cd "$TMP" || exit 1
-    continue
+    
+    echo "Using default branch: $DEFAULT_BRANCH"
+    
+    # Checkout the default branch
+    if ! git checkout "$DEFAULT_BRANCH"; then
+      echo "❌ Failed to checkout the default branch ${DEFAULT_BRANCH}. Skipping..."
+      cd "$TMP" || exit 1
+      continue
+    fi
+    
+    # Create and checkout the new branch
+    if ! git checkout -b "$BRANCH_NAME"; then
+      echo "❌ Failed to create branch ${BRANCH_NAME}. Skipping..."
+      cd "$TMP" || exit 1
+      continue
+    fi
   fi
   
   # Create data directory
@@ -500,8 +579,13 @@ EOF
     continue
   }
   
-  git config user.email "chaos-engine@example.com"
-  git config user.name "Chaos Engine"
+  # Configure git user if not already configured for this repo
+  if [[ -z "$(git config user.email 2>/dev/null)" ]]; then
+    git config user.email "chaos-engine@example.com"
+  fi
+  if [[ -z "$(git config user.name 2>/dev/null)" ]]; then
+    git config user.name "Chaos Engine"  
+  fi
   
   if ! git commit -m "Add blob data files (${FINAL_SIZE}MB)" -m "Generated by Chaos Engine testing suite."; then
     echo "❌ Failed to commit changes. Skipping..."
