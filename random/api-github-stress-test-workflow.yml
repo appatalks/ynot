@@ -86,6 +86,8 @@ jobs:
           urls=(
             "${{ github.api_url }}"
             "${{ github.server_url }}/SonarSource/sonarqube-scan-action"
+            "https://api.github.com"
+            "https://github.com/SonarSource/sonarqube-scan-action"
           )
           
           echo "=== GitHub Connect API Stress Test ===" | tee -a "$LOG_FILE"
