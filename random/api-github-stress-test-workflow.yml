@@ -1,0 +1,185 @@
+name: GitHub API Stress Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_iterations:
+        description: 'Maximum number of test iterations'
+        required: false
+        default: '1000'
+        type: string
+      sleep_between_tests:
+        description: 'Sleep time between tests (seconds)'
+        required: false
+        default: '1'
+        type: string
+      exit_on_failure:
+        description: 'Exit on first failure'
+        required: false
+        default: false
+        type: boolean
+  #schedule:
+    # Run daily at 2 AM UTC
+    #- cron: '0 2 * * *'
+
+jobs:
+  stress-test:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Print hello world
+        run: |
+          echo "Hello World - $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+      
+      - name: Force action download via uses (GitHub Connect API test)
+        id: download-action
+        run: |
+          echo "Action will be downloaded by the runner when referenced in next step"
+          echo "This step ensures the action metadata is fetched"
+      
+      - name: Reference action to trigger download
+        uses: sonarsource/sonarqube-scan-action@v6.0.0
+        continue-on-error: true
+        timeout-minutes: 1
+        if: false
+      
+      - name: Verify action was downloaded
+        if: always()
+        run: |
+          PARENT_DIR=$(dirname "$RUNNER_WORKSPACE")
+          ACTION_PATH="$PARENT_DIR/_actions/sonarsource/sonarqube-scan-action/v6.0.0"
+          if [ -d "$ACTION_PATH" ]; then
+            echo "✓ Action downloaded successfully from GitHub Connect API"
+            echo "Path: $ACTION_PATH"
+            ls -la "$ACTION_PATH" | head -20
+          else
+            echo "✗ Action was not downloaded"
+            exit 1
+          fi
+      
+      - name: Cleanup downloaded action
+        if: success()
+        run: |
+          PARENT_DIR=$(dirname "$RUNNER_WORKSPACE")
+          ACTION_PATH="$PARENT_DIR/_actions/sonarsource/sonarqube-scan-action/v6.0.0"
+          echo "Cleaning up: $ACTION_PATH"
+          rm -rf "$ACTION_PATH" || true
+          echo "Cleanup complete"
+      
+      - name: Run API stress test
+        env:
+          MAX_ITERATIONS: ${{ inputs.max_iterations || '1000' }}
+          SLEEP_BETWEEN_TESTS: ${{ inputs.sleep_between_tests || '1' }}
+          EXIT_ON_FAILURE: ${{ inputs.exit_on_failure || 'false' }}
+        run: |
+          set -euo pipefail
+          
+          # Configuration
+          LOG_FILE="stress-test-$(date -u +%Y%m%dT%H%M%SZ).log"
+          
+          # Counters
+          SUCCESS_COUNT=0
+          FAILURE_COUNT=0
+          ITERATION=0
+          
+          # URLs to test
+          urls=(
+            "${{ github.api_url }}"
+            "${{ github.server_url }}/SonarSource/sonarqube-scan-action"
+          )
+          
+          echo "=== GitHub Connect API Stress Test ===" | tee -a "$LOG_FILE"
+          echo "Start: $(date -u)" | tee -a "$LOG_FILE"
+          echo "Max iterations: $MAX_ITERATIONS" | tee -a "$LOG_FILE"
+          echo "Sleep between tests: ${SLEEP_BETWEEN_TESTS}s" | tee -a "$LOG_FILE"
+          echo "" | tee -a "$LOG_FILE"
+          
+          # Certificate revocation check
+          echo "Checking certificate revocation connectivity..." | tee -a "$LOG_FILE"
+          results=$(curl -vvk ${{ github.api_url }}/ -w '\n%{certs}\n' 2>&1 || true)
+          if [[ $results == *"unable to check revocation"* ]]; then
+            echo "⚠ Certificate revocation authority unreachable (firewall/proxy issue)" | tee -a "$LOG_FILE"
+          else
+            echo "✓ Certificate revocation authority reachable" | tee -a "$LOG_FILE"
+          fi
+          echo "" | tee -a "$LOG_FILE"
+          
+          # Stress test loop
+          while [[ $ITERATION -lt $MAX_ITERATIONS ]]; do
+            ITERATION=$((ITERATION + 1))
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+            echo "=== Iteration $ITERATION at $TIMESTAMP ===" | tee -a "$LOG_FILE"
+          
+            ITERATION_FAILED=false
+          
+            for url in "${urls[@]}"; do
+              CURL_OUTPUT=$(curl -L -o /dev/null -s -w "http_code:%{http_code}\ntime_namelookup:%{time_namelookup}\ntime_connect:%{time_connect}\ntime_appconnect:%{time_appconnect}\ntime_pretransfer:%{time_pretransfer}\ntime_starttransfer:%{time_starttransfer}\ntime_total:%{time_total}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$url" 2>/dev/null || echo "http_code:000")
+          
+              HTTP_CODE=$(echo "$CURL_OUTPUT" | grep "^http_code:" | cut -d: -f2)
+              TIME_DNS=$(echo "$CURL_OUTPUT" | grep "^time_namelookup:" | cut -d: -f2)
+              TIME_CONNECT=$(echo "$CURL_OUTPUT" | grep "^time_connect:" | cut -d: -f2)
+              TIME_TLS=$(echo "$CURL_OUTPUT" | grep "^time_appconnect:" | cut -d: -f2)
+              TIME_TTFB=$(echo "$CURL_OUTPUT" | grep "^time_starttransfer:" | cut -d: -f2)
+              TIME_TOTAL=$(echo "$CURL_OUTPUT" | grep "^time_total:" | cut -d: -f2)
+          
+              TIME_DNS_MS=$(awk "BEGIN {printf \"%.0f\", $TIME_DNS * 1000}")
+              TIME_CONNECT_MS=$(awk "BEGIN {printf \"%.0f\", $TIME_CONNECT * 1000}")
+              TIME_TLS_MS=$(awk "BEGIN {printf \"%.0f\", ($TIME_TLS - $TIME_CONNECT) * 1000}")
+              TIME_TTFB_MS=$(awk "BEGIN {printf \"%.0f\", $TIME_TTFB * 1000}")
+              TIME_TOTAL_MS=$(awk "BEGIN {printf \"%.0f\", $TIME_TOTAL * 1000}")
+          
+              if [[ "$HTTP_CODE" =~ ^(200|301|302)$ ]]; then
+                echo "  ✓ $url → HTTP $HTTP_CODE (Total: ${TIME_TOTAL_MS}ms | DNS: ${TIME_DNS_MS}ms | TCP: ${TIME_CONNECT_MS}ms | TLS: ${TIME_TLS_MS}ms | TTFB: ${TIME_TTFB_MS}ms)" | tee -a "$LOG_FILE"
+              else
+                echo "  ✗ $url → HTTP $HTTP_CODE (Total: ${TIME_TOTAL_MS}ms) [FAILED]" | tee -a "$LOG_FILE"
+                ITERATION_FAILED=true
+              fi
+            done
+          
+            if $ITERATION_FAILED; then
+              FAILURE_COUNT=$((FAILURE_COUNT + 1))
+              echo "  Result: FAILED" | tee -a "$LOG_FILE"
+            else
+              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              echo "  Result: SUCCESS" | tee -a "$LOG_FILE"
+            fi
+          
+            echo "" | tee -a "$LOG_FILE"
+          
+            # Exit early on first failure if requested
+            if [[ "$EXIT_ON_FAILURE" == "true" ]] && $ITERATION_FAILED; then
+              echo "Exiting on first failure (EXIT_ON_FAILURE=true)" | tee -a "$LOG_FILE"
+              break
+            fi
+          
+            sleep "$SLEEP_BETWEEN_TESTS"
+          done
+          
+          # Summary
+          echo "=== Summary ===" | tee -a "$LOG_FILE"
+          echo "End: $(date -u)" | tee -a "$LOG_FILE"
+          echo "Total iterations: $ITERATION" | tee -a "$LOG_FILE"
+          echo "Successful: $SUCCESS_COUNT" | tee -a "$LOG_FILE"
+          echo "Failed: $FAILURE_COUNT" | tee -a "$LOG_FILE"
+          echo "Success rate: $(awk "BEGIN {printf \"%.2f\", ($SUCCESS_COUNT / $ITERATION) * 100}")%" | tee -a "$LOG_FILE"
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: stress-test-results-${{ github.run_number }}
+          path: stress-test-*.log
+          retention-days: 30
+      
+      - name: Post summary
+        if: always()
+        run: |
+          if [ -f stress-test-*.log ]; then
+            LOG_FILE=$(ls -t stress-test-*.log | head -1)
+            echo "## Stress Test Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 5 "=== Summary ===" "$LOG_FILE" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
