@@ -1,0 +1,203 @@
+name: Network Connectivity Diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostics:
+    runs-on: self-hosted
+    steps:
+      - name: Create diagnostic script
+        run: |
+          cat <<'EOF' > network-connectivity-diagnostics.sh
+          #!/bin/bash
+          # Self-contained connectivity diagnostics script that is resilient on runners with missing tools.
+          OUTFILE="diagnostic_$(date '+%Y%m%d_%H%M').log"
+
+          # Run a command if present, otherwise log that it's missing.
+          log_and_run() {
+              echo "========================================================" >> "$OUTFILE"
+              echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$OUTFILE"
+              echo "--------------------------------------------------------" >> "$OUTFILE"
+
+              cmd="$1"
+              if ! command -v "$cmd" >/dev/null 2>&1; then
+                  echo "SKIPPED: command not found: $cmd" >> "$OUTFILE"
+                  echo >> "$OUTFILE"
+                  return 0
+              fi
+
+              # Run the command (preserving arguments). Capture stdout+stderr and time output.
+              { time "$@"; } 2>&1 | tee -a "$OUTFILE"
+              echo >> "$OUTFILE"
+          }
+
+          # Fallback runner for a command with a timeout when 'timeout' isn't available.
+          run_with_timeout() {
+              # Usage: run_with_timeout <seconds> <command> [args...]
+              if command -v timeout >/dev/null 2>&1; then
+                  timeout "$@"
+                  return $?
+              fi
+
+              # Portable-ish fallback: run command in background and kill if still running after N seconds.
+              secs="$1"; shift
+              ( "$@" ) &
+              child=$!
+              (
+                sleep "$secs"
+                if kill -0 "$child" 2>/dev/null; then
+                  kill "$child" 2>/dev/null || true
+                fi
+              ) &
+              watcher=$!
+              wait "$child" 2>/dev/null || true
+              kill "$watcher" 2>/dev/null || true
+              return 0
+          }
+
+          echo "Starting diagnostics at $(date)" > "$OUTFILE"
+          echo "" >> "$OUTFILE"
+
+          log_and_run dig api.github.com
+          log_and_run ping -c 30 api.github.com
+          log_and_run ping -c 30 -M do -s 1472 api.github.com
+          log_and_run openssl s_client -connect api.github.com:443 -servername api.github.com
+
+          echo "" >> "$OUTFILE"
+          echo "Please standby..." >> "$OUTFILE"
+
+          echo "========================================================" >> "$OUTFILE"
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] Looping openssl s_client 30 times" >> "$OUTFILE"
+          echo "--------------------------------------------------------" >> "$OUTFILE"
+
+          if ! command -v openssl >/dev/null 2>&1; then
+              echo "SKIPPED: openssl not found; skipping looped checks" >> "$OUTFILE"
+          else
+              for i in {1..30}; do
+                  echo "Try $i:" >> "$OUTFILE"
+                  # Use timeout helper if available, otherwise fallback implementation.
+                  run_with_timeout 5 openssl s_client -connect api.github.com:443 -servername api.github.com < /dev/null 2>&1 \
+                    | egrep 'CONNECTED|verify|ssl|Certificate|Cipher|Protocol' >> "$OUTFILE" || true
+                  echo "----" >> "$OUTFILE"
+                  sleep 1
+              done
+          fi
+
+          echo "" >> "$OUTFILE"
+          echo "Please standby..." >> "$OUTFILE"
+
+          log_and_run mtr -c 30 -r api.github.com
+
+          # netstat fallbacks:
+          # - netstat -i -> ip -s link ; /proc/net/dev
+          # - netstat -s -> ss -s ; /proc/net/snmp ; /proc/net/netstat
+          if command -v netstat >/dev/null 2>&1; then
+              log_and_run netstat -i
+              log_and_run netstat -s
+          else
+              echo "SKIPPED: netstat not found; attempting fallbacks" >> "$OUTFILE"
+              if command -v ip >/dev/null 2>&1; then
+                  echo "Fallback: ip -s link (interface statistics)" >> "$OUTFILE"
+                  log_and_run ip -s link
+              else
+                  echo "Fallback: /proc/net/dev (interface statistics)" >> "$OUTFILE"
+                  if [ -r /proc/net/dev ]; then
+                      echo "--------------------------------------------------------" >> "$OUTFILE"
+                      echo "/proc/net/dev contents:" >> "$OUTFILE"
+                      cat /proc/net/dev >> "$OUTFILE" 2>&1
+                      echo >> "$OUTFILE"
+                  else
+                      echo "SKIPPED: no /proc/net/dev available" >> "$OUTFILE"
+                  fi
+              fi
+
+              # For protocol/socket stats
+              if command -v ss >/dev/null 2>&1; then
+                  echo "Fallback: ss -s (socket statistics)" >> "$OUTFILE"
+                  log_and_run ss -s
+              else
+                  echo "Fallback: /proc/net/snmp and /proc/net/netstat (protocol stats)" >> "$OUTFILE"
+                  if [ -r /proc/net/snmp ]; then
+                      echo "--------------------------------------------------------" >> "$OUTFILE"
+                      echo "/proc/net/snmp:" >> "$OUTFILE"
+                      cat /proc/net/snmp >> "$OUTFILE" 2>&1
+                      echo >> "$OUTFILE"
+                  fi
+                  if [ -r /proc/net/netstat ]; then
+                      echo "--------------------------------------------------------" >> "$OUTFILE"
+                      echo "/proc/net/netstat:" >> "$OUTFILE"
+                      cat /proc/net/netstat >> "$OUTFILE" 2>&1
+                      echo >> "$OUTFILE"
+                  fi
+              fi
+          fi
+
+          # chronyc fallback: timedatectl, ntpq, date
+          if command -v chronyc >/dev/null 2>&1; then
+              log_and_run chronyc tracking
+          else
+              echo "SKIPPED: chronyc not found; attempting fallbacks" >> "$OUTFILE"
+              if command -v timedatectl >/dev/null 2>&1; then
+                  log_and_run timedatectl status
+              else
+                  echo "Fallback: date -u (UTC) and /etc/adjtime if present" >> "$OUTFILE"
+                  log_and_run date -u
+                  if [ -r /etc/adjtime ]; then
+                      echo "--------------------------------------------------------" >> "$OUTFILE"
+                      echo "/etc/adjtime:" >> "$OUTFILE"
+                      cat /etc/adjtime >> "$OUTFILE" 2>&1
+                      echo >> "$OUTFILE"
+                  fi
+                  if command -v ntpq >/dev/null 2>&1; then
+                      log_and_run ntpq -p
+                  fi
+              fi
+          fi
+
+          # hwclock: try sudo hwclock --show; if missing, try /dev/rtc or fallback to date
+          if command -v hwclock >/dev/null 2>&1; then
+              log_and_run sudo hwclock --show
+          else
+              echo "SKIPPED: hwclock not found; attempting fallbacks" >> "$OUTFILE"
+              if [ -r /dev/rtc ] || [ -r /dev/rtc0 ]; then
+                  echo "RTC present; reading /dev/rtc* is platform specific - skipping raw read for safety" >> "$OUTFILE"
+              else
+                  log_and_run date
+              fi
+          fi          
+
+          echo "" >> "$OUTFILE"
+          echo "Diagnostics finished at $(date)" >> "$OUTFILE"
+          echo "Diagnostics Completed!" >> "$OUTFILE"
+          EOF
+
+      - name: Make diagnostic script executable
+        run: chmod +x network-connectivity-diagnostics.sh
+
+      - name: Run diagnostics
+        run: |
+          # Run the diagnostic script but do not let a non-zero exit code from an internal command fail the job
+          # (we already handle missing commands inside the script).
+          ./network-connectivity-diagnostics.sh || true
+
+      - name: Show files produced (debug)
+        run: ls -alh diagnostic_*.log || true
+
+      - name: Find generated diagnostic log
+        id: find_log
+        run: |
+          # Pick the latest diagnostic log if present; otherwise create a placeholder so upload-artifact always gets a path.
+          LOG=$(ls diagnostic_*.log 2>/dev/null | tail -n 1 || true)
+          if [ -z "$LOG" ]; then
+            echo "No diagnostic log found; creating placeholder file" >&2
+            echo "No diagnostic log produced by run on $(date)" > diagnostic_not_found.txt
+            LOG=diagnostic_not_found.txt
+          fi
+          echo "log_file=$LOG" >> "$GITHUB_OUTPUT"
+
+      - name: Upload diagnostic log artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: diagnostics-log
+          path: ${{ steps.find_log.outputs.log_file }}
