@@ -7,8 +7,21 @@ This guide provides step-by-step instructions for integrating Azure MCP servers 
 GitHub Copilot's coding agent can connect to Azure resources through MCP (Model Context Protocol) servers. This enables:
 - **Automatic discovery** of Azure Data Explorer clusters and databases
 - **Natural language queries** to Azure resources
-- **Secure authentication** via Azure Managed Identity (no secrets needed!)
+- **Secure authentication** via Azure CLI or Managed Identity
 - **Seamless integration** with your GitHub repositories
+
+This repository supports **two authentication models**:
+
+### 🌐 Per-User Identity (Codespaces)
+- Each collaborator uses their own Azure account
+- Authentication via Azure CLI (`az login --use-device-code`)
+- Zero configuration required
+- Best for development and personal use
+
+### 🔐 Shared Identity (GitHub.com)
+- Repository-wide access via Managed Identity
+- Configured once by repository admin using `azd coding-agent config`
+- Best for team-wide production access
 
 ## Prerequisites
 
@@ -20,7 +33,68 @@ GitHub Copilot's coding agent can connect to Azure resources through MCP (Model 
 
 ## Setup Methods
 
-### Method 1: Automated Setup with Azure Developer CLI (Recommended) 🚀
+### Method 1: GitHub Codespaces with Per-User Azure Identity (Recommended for Collaborators) 🌐
+
+This method allows **any collaborator** to use their personal Azure account in a Codespace without needing repository-level secrets.
+
+#### Step 1: Create a Codespace
+
+1. Open this repository on GitHub.com
+2. Click **Code** → **Codespaces** → **Create codespace on main**
+3. Wait for the Codespace to build (includes Node.js 18+ and Azure CLI)
+
+#### Step 2: Authenticate with Azure
+
+In the Codespace terminal, run:
+
+```bash
+az login --use-device-code
+```
+
+Follow the device code flow:
+- Copy the code shown in the terminal
+- Open https://microsoft.com/devicelogin in your browser
+- Paste the code and sign in with your Azure account
+
+#### Step 3: (Optional) Set Default Subscription
+
+If you have multiple Azure subscriptions:
+
+```bash
+# List available subscriptions
+az account list --output table
+
+# Set the default subscription
+az account set --subscription <subscription-id>
+```
+
+#### Step 4: Verify Authentication
+
+```bash
+az account show
+```
+
+#### Step 5: Start Using Copilot
+
+1. Open Copilot Chat in VS Code (Ctrl+Shift+I or Cmd+Shift+I)
+2. The `.github/mcp.json` configuration is automatically loaded
+3. Azure and ADX MCP servers use your Azure CLI credentials
+4. Try: "Show me all my Azure Data Explorer clusters"
+
+**That's it!** No repository secrets or configuration files needed.
+
+#### How It Works
+
+- The `.github/mcp.json` is automatically loaded in Codespaces
+- Azure and ADX MCP servers use Azure CLI authentication by default
+- MCP servers discover resources based on **your Azure permissions**
+- Each collaborator works with their own Azure identity
+
+---
+
+### Method 2: Automated Setup with Azure Developer CLI (For GitHub.com) 🚀
+
+This method configures a **shared Managed Identity** for the entire repository, used when accessing GitHub Copilot on GitHub.com (not Codespaces).
 
 This is the fastest and most secure method.
 
@@ -103,9 +177,9 @@ Open GitHub Copilot Chat in VS Code or GitHub.com and try:
 
 ---
 
-### Method 2: Manual Configuration
+### Method 3: Manual Configuration (Advanced)
 
-If you prefer manual setup or need custom configuration:
+If you prefer manual setup or need custom configuration for the shared identity model:
 
 #### Step 1: Create MCP Configuration File
 

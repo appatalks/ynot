@@ -40,6 +40,24 @@ The Azure DevOps MCP server enables:
 
 ## Setup Instructions
 
+This repository supports **two authentication models** for accessing Azure resources:
+
+### 🌐 Per-User Identity (Codespaces)
+- **Who:** Individual collaborators working in GitHub Codespaces
+- **Authentication:** Azure CLI (`az login --use-device-code`)
+- **Identity:** Each user's personal Azure account
+- **Setup:** Zero configuration - works out-of-the-box
+- **Best for:** Development, exploration, personal Azure subscriptions
+
+### 🔐 Shared Identity (GitHub.com)
+- **Who:** Repository-wide access via GitHub Copilot on GitHub.com
+- **Authentication:** Managed Identity with federated credentials
+- **Identity:** Single shared identity configured via `azd coding-agent config`
+- **Setup:** One-time setup by repository admin
+- **Best for:** Production, team-wide access, consistent permissions
+
+**Choose the model that fits your workflow!** Most collaborators will use **Per-User Identity in Codespaces** for simplicity.
+
 ### Prerequisites
 
 - **Node.js** (v18 or later) and npm/npx
@@ -51,7 +69,69 @@ The Azure DevOps MCP server enables:
 
 ---
 
-## Option 1: GitHub Copilot Integration (Recommended) 🚀
+## Option 1: GitHub Codespaces with Per-User Azure Identity 🌐
+
+**Best for:** Collaborators who want to use their own Azure account in a Codespace without setting up shared credentials.
+
+This option allows **any collaborator** to use GitHub Codespaces with their personal Azure identity via Azure CLI authentication. No repository-level secrets required!
+
+### Setup Steps
+
+1. **Create a Codespace**:
+   - Open this repository on GitHub.com
+   - Click **Code** → **Codespaces** → **Create codespace on main**
+   - Wait for the Codespace to build (includes Node.js 18+ and Azure CLI pre-installed)
+
+2. **Authenticate with Azure**:
+   ```bash
+   az login --use-device-code
+   ```
+   
+   Follow the device code flow:
+   - Copy the code shown in the terminal
+   - Open https://microsoft.com/devicelogin in your browser
+   - Paste the code and sign in with your Azure account
+
+3. **(Optional) Select your subscription** if you have multiple:
+   ```bash
+   # List available subscriptions
+   az account list --output table
+   
+   # Set the default subscription
+   az account set --subscription <subscription-id>
+   ```
+
+4. **Verify authentication**:
+   ```bash
+   az account show
+   ```
+
+5. **Start using GitHub Copilot Chat**:
+   - Open Copilot Chat in VS Code (Ctrl+Shift+I or Cmd+Shift+I)
+   - The MCP servers will automatically use your Azure CLI credentials
+   - Try: "Show me all my Azure Data Explorer clusters"
+
+### How It Works
+
+- The `.github/mcp.json` configuration is automatically loaded in Codespaces
+- Azure and ADX MCP servers use **Azure CLI authentication** by default (no env vars needed!)
+- The MCP servers discover whatever Azure resources **your account** has access to
+- Each collaborator uses their own Azure identity (no shared credentials)
+
+### Key Benefits
+
+✅ **No shared secrets** - Each user brings their own Azure identity  
+✅ **Zero configuration** - Works out-of-the-box in Codespaces  
+✅ **Secure by default** - Uses Azure CLI authentication (user-delegated)  
+✅ **Easy collaboration** - Any team member can spin up a Codespace and start working
+
+---
+
+## Option 2: GitHub Copilot Integration with Shared Identity (GitHub.com) 🚀
+
+**Best for:** Using GitHub Copilot Coding Agent on GitHub.com with a shared managed identity for the entire repository.
+
+The easiest way to integrate with GitHub Copilot on GitHub.com is using the Azure Developer CLI:
 
 ### Quick Setup with Azure Developer CLI
 
@@ -132,7 +212,7 @@ Once configured, you can use natural language in GitHub Copilot:
 
 ---
 
-## Option 2: Claude Desktop Setup
+## Option 3: Claude Desktop Setup
 
 ### 1. Authenticate with Azure CLI
 
@@ -155,6 +235,37 @@ az account show
    - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 2. **Add Azure MCP Server configurations:**
+
+**Option A: Azure CLI Authentication (Recommended for Development)**
+
+If you've run `az login`, you can use Azure CLI authentication without any environment variables:
+
+```json
+{
+  "mcpServers": {
+    "azure-data-explorer": {
+      "command": "npx",
+      "args": ["-y", "adx-mcp-server"]
+    },
+    "azure": {
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+    },
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@azure-devops/mcp"],
+      "env": {
+        "ADO_PERSONAL_ACCESS_TOKEN": "your-azure-devops-pat-token",
+        "ADO_ORG": "your-azure-devops-org-name"
+      }
+    }
+  }
+}
+```
+
+**Option B: Explicit Credentials (For Service Principal or Managed Identity)**
+
+If you need to use specific credentials:
 
 ```json
 {
@@ -189,13 +300,11 @@ az account show
 }
 ```
 
-**Note**: If using Azure CLI authentication, you can omit the environment variables, and the MCP servers will use your Azure CLI credentials automatically.
-
 3. **Restart Claude Desktop** to load the configuration.
 
 ---
 
-## Option 3: VS Code with GitHub Copilot
+## Option 4: VS Code with GitHub Copilot (Local Development)
 
 The repository includes a `.github/mcp.json` configuration file that VS Code and GitHub Copilot can use automatically.
 

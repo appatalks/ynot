@@ -2,12 +2,7 @@
   "mcpServers": {
     "azure": {
       "command": "npx",
-      "args": ["-y", "@azure/mcp@latest", "server", "start"],
-      "env": {
-        "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
-        "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
-        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
-      }
+      "args": ["-y", "@azure/mcp@latest", "server", "start"]
     },
     "azure-devops": {
       "command": "npx",
@@ -19,12 +14,7 @@
     },
     "azure-data-explorer": {
       "command": "npx",
-      "args": ["-y", "adx-mcp-server"],
-      "env": {
-        "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
-        "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
-        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
-      }
+      "args": ["-y", "adx-mcp-server"]
     }
   }
 }
