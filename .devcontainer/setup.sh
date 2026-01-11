@@ -1,5 +1,7 @@
 #!/bin/bash
+set -e
 
+# Display Azure MCP Server setup instructions
 cat << 'EOF'
 
 === Azure MCP Server Setup ===
@@ -23,3 +25,5 @@ For more details, see MCP_SETUP.md
 ================================
 
 EOF
+
+exit 0
