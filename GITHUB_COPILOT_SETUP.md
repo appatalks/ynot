@@ -179,11 +179,35 @@ Open GitHub Copilot Chat in VS Code or GitHub.com and try:
 
 ### Method 3: Manual Configuration (Advanced)
 
-If you prefer manual setup or need custom configuration for the shared identity model:
+**Note**: The default `.github/mcp.json` in this repository is already configured for **per-user Azure CLI authentication** (no env vars). This section is for advanced users who want to customize the configuration for **shared identity** with explicit credentials.
 
-#### Step 1: Create MCP Configuration File
+#### Option A: Keep Per-User Authentication (Default)
 
-This repository already includes `.github/mcp.json`. You can customize it:
+The repository's `.github/mcp.json` is already configured for per-user authentication:
+
+```json
+{
+  "mcpServers": {
+    "azure": {
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+    },
+    "azure-data-explorer": {
+      "command": "npx",
+      "args": ["-y", "adx-mcp-server"]
+    }
+  }
+}
+```
+
+With this configuration:
+- ✅ Works in Codespaces with `az login --use-device-code`
+- ✅ No repository secrets needed
+- ✅ Each user brings their own Azure identity
+
+#### Option B: Add Explicit Credentials for Shared Identity
+
+If you need shared identity with explicit credentials, modify `.github/mcp.json`:
 
 ```json
 {
@@ -210,7 +234,7 @@ This repository already includes `.github/mcp.json`. You can customize it:
 }
 ```
 
-#### Step 2: Set Up GitHub Repository Secrets
+Then set up repository secrets:
 
 1. Go to **Settings** → **Secrets and variables** → **Codespaces** (or **Actions**)
 2. Add the following secrets with `COPILOT_MCP_` prefix:
@@ -219,7 +243,9 @@ This repository already includes `.github/mcp.json`. You can customize it:
    - `COPILOT_MCP_AZURE_CLIENT_ID`: Client ID of your managed identity or service principal
    - `COPILOT_MCP_AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
 
-#### Step 3: Create Azure Managed Identity (if not exists)
+#### Additional Setup for Option B
+
+If using Option B (explicit credentials), create Azure Managed Identity:
 
 ```bash
 # Create resource group (if needed)
@@ -237,7 +263,7 @@ az identity show \
   --query clientId -o tsv
 ```
 
-#### Step 4: Assign Permissions
+**Assign Permissions**
 
 Assign Reader role to the managed identity:
 
@@ -260,7 +286,7 @@ az kusto database-principal-assignment create \
   --resource-group <RESOURCE_GROUP>
 ```
 
-#### Step 5: Configure Federated Credentials
+**Configure Federated Credentials**
 
 Link your GitHub repository to the managed identity:
 
