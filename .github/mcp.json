@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "azure": {
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "env": {
+        "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
+        "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
+        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
+      }
+    },
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@azure-devops/mcp"],
+      "env": {
+        "ADO_PERSONAL_ACCESS_TOKEN": "${ADO_PERSONAL_ACCESS_TOKEN}",
+        "ADO_ORG": "${ADO_ORG}"
+      }
+    },
+    "azure-data-explorer": {
+      "command": "npx",
+      "args": ["-y", "adx-mcp-server"],
+      "env": {
+        "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
+        "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
+        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
+      }
+    }
+  }
+}
