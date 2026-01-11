@@ -7,8 +7,21 @@ This guide provides step-by-step instructions for integrating Azure MCP servers 
 GitHub Copilot's coding agent can connect to Azure resources through MCP (Model Context Protocol) servers. This enables:
 - **Automatic discovery** of Azure Data Explorer clusters and databases
 - **Natural language queries** to Azure resources
-- **Secure authentication** via Azure Managed Identity (no secrets needed!)
+- **Secure authentication** via Azure CLI or Managed Identity
 - **Seamless integration** with your GitHub repositories
+
+This repository supports **two authentication models**:
+
+### 🌐 Per-User Identity (Codespaces)
+- Each collaborator uses their own Azure account
+- Authentication via Azure CLI (`az login --use-device-code`)
+- Zero configuration required
+- Best for development and personal use
+
+### 🔐 Shared Identity (GitHub.com)
+- Repository-wide access via Managed Identity
+- Configured once by repository admin using `azd coding-agent config`
+- Best for team-wide production access
 
 ## Prerequisites
 
@@ -20,7 +33,68 @@ GitHub Copilot's coding agent can connect to Azure resources through MCP (Model 
 
 ## Setup Methods
 
-### Method 1: Automated Setup with Azure Developer CLI (Recommended) 🚀
+### Method 1: GitHub Codespaces with Per-User Azure Identity (Recommended for Collaborators) 🌐
+
+This method allows **any collaborator** to use their personal Azure account in a Codespace without needing repository-level secrets.
+
+#### Step 1: Create a Codespace
+
+1. Open this repository on GitHub.com
+2. Click **Code** → **Codespaces** → **Create codespace on main**
+3. Wait for the Codespace to build (includes Node.js 18+ and Azure CLI)
+
+#### Step 2: Authenticate with Azure
+
+In the Codespace terminal, run:
+
+```bash
+az login --use-device-code
+```
+
+Follow the device code flow:
+- Copy the code shown in the terminal
+- Open https://microsoft.com/devicelogin in your browser
+- Paste the code and sign in with your Azure account
+
+#### Step 3: (Optional) Set Default Subscription
+
+If you have multiple Azure subscriptions:
+
+```bash
+# List available subscriptions
+az account list --output table
+
+# Set the default subscription
+az account set --subscription <subscription-id>
+```
+
+#### Step 4: Verify Authentication
+
+```bash
+az account show
+```
+
+#### Step 5: Start Using Copilot
+
+1. Open Copilot Chat in VS Code (Ctrl+Shift+I or Cmd+Shift+I)
+2. The `.github/mcp.json` configuration is automatically loaded
+3. Azure and ADX MCP servers use your Azure CLI credentials
+4. Try: "Show me all my Azure Data Explorer clusters"
+
+**That's it!** No repository secrets or configuration files needed.
+
+#### How It Works
+
+- The `.github/mcp.json` is automatically loaded in Codespaces
+- Azure and ADX MCP servers use Azure CLI authentication by default
+- MCP servers discover resources based on **your Azure permissions**
+- Each collaborator works with their own Azure identity
+
+---
+
+### Method 2: Automated Setup with Azure Developer CLI (For GitHub.com) 🚀
+
+This method configures a **shared Managed Identity** for the entire repository, used when accessing GitHub Copilot on GitHub.com (not Codespaces).
 
 This is the fastest and most secure method.
 
@@ -103,13 +177,37 @@ Open GitHub Copilot Chat in VS Code or GitHub.com and try:
 
 ---
 
-### Method 2: Manual Configuration
+### Method 3: Manual Configuration (Advanced)
 
-If you prefer manual setup or need custom configuration:
+**Note**: The default `.github/mcp.json` in this repository is already configured for **per-user Azure CLI authentication** (no env vars). This section is for advanced users who want to customize the configuration for **shared identity** with explicit credentials.
 
-#### Step 1: Create MCP Configuration File
+#### Option A: Keep Per-User Authentication (Default)
 
-This repository already includes `.github/mcp.json`. You can customize it:
+The repository's `.github/mcp.json` is already configured for per-user authentication:
+
+```json
+{
+  "mcpServers": {
+    "azure": {
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+    },
+    "azure-data-explorer": {
+      "command": "npx",
+      "args": ["-y", "adx-mcp-server"]
+    }
+  }
+}
+```
+
+With this configuration:
+- ✅ Works in Codespaces with `az login --use-device-code`
+- ✅ No repository secrets needed
+- ✅ Each user brings their own Azure identity
+
+#### Option B: Add Explicit Credentials for Shared Identity
+
+If you need shared identity with explicit credentials, modify `.github/mcp.json`:
 
 ```json
 {
@@ -136,7 +234,7 @@ This repository already includes `.github/mcp.json`. You can customize it:
 }
 ```
 
-#### Step 2: Set Up GitHub Repository Secrets
+Then set up repository secrets:
 
 1. Go to **Settings** → **Secrets and variables** → **Codespaces** (or **Actions**)
 2. Add the following secrets with `COPILOT_MCP_` prefix:
@@ -145,7 +243,9 @@ This repository already includes `.github/mcp.json`. You can customize it:
    - `COPILOT_MCP_AZURE_CLIENT_ID`: Client ID of your managed identity or service principal
    - `COPILOT_MCP_AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
 
-#### Step 3: Create Azure Managed Identity (if not exists)
+#### Additional Setup for Option B
+
+If using Option B (explicit credentials), create Azure Managed Identity:
 
 ```bash
 # Create resource group (if needed)
@@ -163,7 +263,7 @@ az identity show \
   --query clientId -o tsv
 ```
 
-#### Step 4: Assign Permissions
+**Assign Permissions**
 
 Assign Reader role to the managed identity:
 
@@ -186,7 +286,7 @@ az kusto database-principal-assignment create \
   --resource-group <RESOURCE_GROUP>
 ```
 
-#### Step 5: Configure Federated Credentials
+**Configure Federated Credentials**
 
 Link your GitHub repository to the managed identity:
 

@@ -10,9 +10,21 @@ This repository supports **Azure MCP (Model Context Protocol) Servers** with **a
 
 **[→ View Complete Setup Guide](./MCP_SETUP.md)**
 
-### 🚀 Quick Start: GitHub Copilot Integration
+### 🚀 Quick Start Options
 
-The easiest way to get started is with GitHub Copilot Coding Agent:
+**Option 1: GitHub Codespaces (Recommended for Collaborators)**
+
+Use your personal Azure account in a Codespace - no setup required:
+
+1. Create a Codespace from this repository
+2. Run `az login --use-device-code` in the terminal
+3. Start using Copilot Chat with Azure MCP tools!
+
+**[→ View Codespaces Setup Guide](./MCP_SETUP.md#option-1-github-codespaces-with-per-user-azure-identity-)**
+
+**Option 2: GitHub Copilot on GitHub.com (Shared Identity)**
+
+Configure a shared managed identity for the entire repository:
 
 ```bash
 # Install Azure Developer CLI
@@ -29,6 +41,8 @@ azd coding-agent config
 ```
 
 This automatically configures GitHub Copilot to access your Azure resources with secure, passwordless authentication!
+
+**[→ View Complete Setup Guide](./MCP_SETUP.md)**
 
 ### ✨ Automatic Azure Data Explorer Discovery
 
