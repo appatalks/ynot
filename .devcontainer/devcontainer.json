@@ -20,7 +20,7 @@
     }
   },
   
-  "postCreateCommand": "echo '\n=== Azure MCP Server Setup ===\n\nTo use Azure MCP servers with your personal Azure account:\n\n1. Authenticate with Azure CLI:\n   az login --use-device-code\n\n2. (Optional) Set your default subscription if you have multiple:\n   az account list --output table\n   az account set --subscription <subscription-id>\n\n3. Verify your authentication:\n   az account show\n\n4. Start using GitHub Copilot Chat with Azure MCP tools!\n   Example: \"Show me all my Azure Data Explorer clusters\"\n\nFor more details, see MCP_SETUP.md\n================================\n'",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   
   "remoteUser": "node"
 }
