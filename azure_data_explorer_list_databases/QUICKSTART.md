@@ -30,6 +30,11 @@ az login --use-device-code
 python list_databases.py
 ```
 
+If you don’t know your cluster URL but have Azure RBAC visibility to ADX resources:
+```bash
+python list_databases.py --discover-clusters
+```
+
 Or use the helper script:
 ```bash
 ./run_example.sh
@@ -37,10 +42,7 @@ Or use the helper script:
 
 ### 📋 What You'll Get
 
-The script connects to:
-```
-https://kvc-k3qugk4g1mk0bzue1v.southcentralus.kusto.windows.net
-```
+The script connects to the ADX cluster URL you provide via `--cluster-url` or the `ADX_CLUSTER_URL` environment variable.
 
 And displays all databases you have access to:
 
@@ -49,7 +51,7 @@ And displays all databases you have access to:
 Azure Data Explorer - Database Listing Tool
 ================================================================================
 
-Cluster URL: https://kvc-k3qugk4g1mk0bzue1v.southcentralus.kusto.windows.net
+Cluster URL: https://<yourcluster>.<region>.kusto.windows.net
 
 Note: Make sure you've authenticated with Azure CLI by running 'az login'
 
@@ -69,14 +71,20 @@ Found 3 database(s):
 
 ### ⚙️ Configuration
 
-The cluster URL is hardcoded in the script (`list_databases.py`) but can be easily modified:
+You can provide the cluster URL one of these ways:
 
-```python
-# Line 98 in list_databases.py
-cluster_url = "https://kvc-k3qugk4g1mk0bzue1v.southcentralus.kusto.windows.net"
+1) Pass it explicitly:
+```bash
+python list_databases.py --cluster-url "https://<yourcluster>.<region>.kusto.windows.net"
 ```
 
-To use a different cluster, simply change this URL.
+2) Set an environment variable (recommended for Codespaces):
+```bash
+export ADX_CLUSTER_URL="https://<yourcluster>.<region>.kusto.windows.net"
+python list_databases.py
+```
+
+In GitHub Codespaces, store `ADX_CLUSTER_URL` as a Codespaces/Repo secret so the URL isn’t committed into the repo.
 
 ### 🔧 Testing Without Azure Access
 
@@ -114,7 +122,7 @@ This will verify:
 ### 📚 Additional Resources
 
 - [Full README](README.md) - Comprehensive documentation
-- [MCP Setup Guide](../MCP_SETUP.md) - AI assistant integration
+- [MCP Setup Guide](../azure-mcp-data-explorer-deployer/MCP_SETUP.md) - AI assistant integration
 - [Azure Data Explorer Docs](https://learn.microsoft.com/en-us/azure/data-explorer/)
 
 ### 🎯 Next Steps

@@ -21,7 +21,7 @@ To use Azure MCP servers with your personal Azure account:
 4. Start using GitHub Copilot Chat with Azure MCP tools!
    Example: "Show me all my Azure Data Explorer clusters"
 
-For more details, see MCP_SETUP.md
+For more details, see azure-mcp-data-explorer-deployer/MCP_SETUP.md
 ================================
 
 EOF

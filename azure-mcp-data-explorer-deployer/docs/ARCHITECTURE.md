@@ -9,11 +9,18 @@ This document provides architectural diagrams and flow charts for understanding 
 │                        GitHub Repository                         │
 │                                                                  │
 │  ┌────────────────┐         ┌─────────────────────┐            │
-│  │ .github/       │         │ Documentation       │            │
-│  │   mcp.json     │────────▶│  - MCP_SETUP.md     │            │
-│  │                │         │  - GITHUB_COPILOT   │            │
-│  │ .env.template  │         │    _SETUP.md        │            │
-│  └────────────────┘         └─────────────────────┘            │
+│  │ .github/       │         │ docs/              │            │
+│  │   mcp.json     │────────▶│  - ARCHITECTURE.md │            │
+│  │                │         │  - QUICK_REFERENCE │            │
+│  │                │         │    .md             │            │
+│  │                │         │  - GITHUB_COPILOT_ │            │
+│  │                │         │    SETUP.md        │            │
+│  └────────────────┘         │  (MCP guide lives  │            │
+│                             │   in azure-mcp-    │            │
+│                             │   data-explorer-   │            │
+│                             │   deployer/        │            │
+│                             │   MCP_SETUP.md)    │            │
+│                             └─────────────────────┘            │
 │          │                                                       │
 └──────────┼───────────────────────────────────────────────────────┘
            │

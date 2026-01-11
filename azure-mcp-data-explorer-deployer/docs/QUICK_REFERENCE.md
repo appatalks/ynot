@@ -274,7 +274,7 @@ az kusto database-principal-assignment create \
 
 ## 📚 Documentation Links
 
-- **MCP Setup**: [MCP_SETUP.md](./MCP_SETUP.md)
+- **MCP Setup**: [azure-mcp-data-explorer-deployer/MCP_SETUP.md](../MCP_SETUP.md)
 - **GitHub Copilot**: [GITHUB_COPILOT_SETUP.md](./GITHUB_COPILOT_SETUP.md)
 - **Architecture**: [ARCHITECTURE.md](./ARCHITECTURE.md)
 

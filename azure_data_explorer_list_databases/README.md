@@ -4,12 +4,7 @@ A Python script to connect to an Azure Data Explorer (ADX/Kusto) cluster and lis
 
 ## Overview
 
-This tool connects to the Azure Data Explorer cluster at:
-```
-https://kvc-k3qugk4g1mk0bzue1v.southcentralus.kusto.windows.net
-```
-
-And displays all databases the authenticated user has access to.
+This tool connects to an Azure Data Explorer cluster URL you provide (via `--cluster-url` or environment variable) and displays all databases the authenticated user has access to.
 
 ## Prerequisites
 
@@ -43,8 +38,23 @@ az account set --subscription <subscription-id>
 Run the script:
 
 ```bash
+python list_databases.py --cluster-url "https://<yourcluster>.<region>.kusto.windows.net"
+```
+
+Or set an environment variable (recommended for Codespaces):
+
+```bash
+export ADX_CLUSTER_URL="https://<yourcluster>.<region>.kusto.windows.net"
 python list_databases.py
 ```
+
+If you don’t know your cluster URL but have Azure RBAC visibility (e.g., Reader) to ADX resources, you can discover clusters via Azure CLI:
+
+```bash
+python list_databases.py --discover-clusters
+```
+
+This uses ARM discovery (`az kusto cluster list`) and may require `az login`.
 
 Or make it executable and run directly:
 
@@ -66,7 +76,7 @@ Example output:
 Azure Data Explorer - Database Listing Tool
 ================================================================================
 
-Cluster URL: https://kvc-k3qugk4g1mk0bzue1v.southcentralus.kusto.windows.net
+Cluster URL: https://<yourcluster>.<region>.kusto.windows.net
 
 Note: Make sure you've authenticated with Azure CLI by running 'az login'
 
@@ -147,7 +157,7 @@ To list databases, you need one of these roles on the cluster:
 
 ## Integration with MCP Servers
 
-This repository includes Azure Data Explorer MCP (Model Context Protocol) server integration. See [MCP_SETUP.md](../MCP_SETUP.md) for information on:
+This repository includes Azure Data Explorer MCP (Model Context Protocol) server integration. See [azure-mcp-data-explorer-deployer/MCP_SETUP.md](../azure-mcp-data-explorer-deployer/MCP_SETUP.md) for information on:
 - Automatic cluster and database discovery
 - AI assistant integration (GitHub Copilot, Claude Desktop, VS Code)
 - Natural language queries to KQL translation

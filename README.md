@@ -8,7 +8,7 @@ Wh(y)not | completely unsupported, yet adventurous playground. By AppaTalks
 
 This repository supports **Azure MCP (Model Context Protocol) Servers** with **automatic resource discovery** for seamless AI-powered Azure integration.
 
-**[→ View Complete Setup Guide](./MCP_SETUP.md)**
+**[→ View Complete Setup Guide](./azure-mcp-data-explorer-deployer/MCP_SETUP.md)**
 
 ### 🚀 Quick Start Options
 
@@ -20,7 +20,7 @@ Use your personal Azure account in a Codespace - no setup required:
 2. Run `az login --use-device-code` in the terminal
 3. Start using Copilot Chat with Azure MCP tools!
 
-**[→ View Codespaces Setup Guide](./MCP_SETUP.md#option-1-github-codespaces-with-per-user-azure-identity-)**
+**[→ View Codespaces Setup Guide](./azure-mcp-data-explorer-deployer/MCP_SETUP.md#option-1-github-codespaces-with-per-user-azure-identity-)**
 
 **Option 2: GitHub Copilot on GitHub.com (Shared Identity)**
 
@@ -42,7 +42,7 @@ azd coding-agent config
 
 This automatically configures GitHub Copilot to access your Azure resources with secure, passwordless authentication!
 
-**[→ View Complete Setup Guide](./MCP_SETUP.md)**
+**[→ View Complete Setup Guide](./azure-mcp-data-explorer-deployer/MCP_SETUP.md)**
 
 ### ✨ Automatic Azure Data Explorer Discovery
 
@@ -77,7 +77,7 @@ Once configured, use natural language in GitHub Copilot, Claude Desktop, or VS C
 
 ### 📚 Full Documentation
 
-See [MCP_SETUP.md](./MCP_SETUP.md) for:
+See [MCP_SETUP.md](./azure-mcp-data-explorer-deployer/MCP_SETUP.md) for:
 - Detailed GitHub Copilot integration steps
 - Claude Desktop configuration
 - VS Code setup

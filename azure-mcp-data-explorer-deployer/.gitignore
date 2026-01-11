@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local auth artifacts (do NOT commit)
+.azure/
+.IdentityService/
+
+# Env
+.env
