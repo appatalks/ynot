@@ -2,3 +2,6 @@
 .env
 *.env
 !.env.template
+__pycache__
+*.pyc
+*.pyo
