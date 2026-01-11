@@ -16,7 +16,45 @@ Authentication:
 
 import sys
 from azure.kusto.data import KustoClient, KustoConnectionStringBuilder
-from azure.identity import AzureCliCredential, DefaultAzureCredential
+from azure.identity import AzureCliCredential, DefaultAzureCredential, CredentialUnavailableError
+from azure.core.exceptions import ClientAuthenticationError
+
+
+def _extract_database_names(response) -> list:
+    """
+    Extract database names from a Kusto query response.
+    
+    Args:
+        response: The response object from a Kusto query
+        
+    Returns:
+        List of database names
+    """
+    databases = []
+    for row in response.primary_results[0]:
+        # The first column is the DatabaseName
+        db_name = row[0]
+        databases.append(db_name)
+    return databases
+
+
+def _execute_database_query(client: KustoClient) -> list:
+    """
+    Execute the database listing query on the cluster.
+    
+    Args:
+        client: Authenticated KustoClient instance
+        
+    Returns:
+        List of database names
+    """
+    query = ".show databases"
+    print(f"Executing query: {query}")
+    
+    # Execute at cluster level (empty database parameter) for cluster-wide queries
+    response = client.execute(database="", query=query)
+    
+    return _extract_database_names(response)
 
 
 def get_databases(cluster_url: str) -> list:
@@ -46,23 +84,10 @@ def get_databases(cluster_url: str) -> list:
         # Create Kusto client
         client = KustoClient(kcsb)
         
-        # Query to list all databases
-        # .show databases returns: DatabaseName, PersistentStorage, Version, etc.
-        query = ".show databases"
+        return _execute_database_query(client)
         
-        print(f"Executing query: {query}")
-        response = client.execute("", query)
-        
-        # Extract database names from the response
-        databases = []
-        for row in response.primary_results[0]:
-            # The first column is typically the DatabaseName
-            db_name = row[0]
-            databases.append(db_name)
-        
-        return databases
-        
-    except Exception as e:
+    except (CredentialUnavailableError, ClientAuthenticationError) as e:
+        # Only catch authentication-related errors, not general exceptions
         print(f"Azure CLI authentication failed: {e}")
         print("Trying DefaultAzureCredential...")
         
@@ -76,17 +101,8 @@ def get_databases(cluster_url: str) -> list:
             )
             
             client = KustoClient(kcsb)
-            query = ".show databases"
             
-            print(f"Executing query: {query}")
-            response = client.execute("", query)
-            
-            databases = []
-            for row in response.primary_results[0]:
-                db_name = row[0]
-                databases.append(db_name)
-            
-            return databases
+            return _execute_database_query(client)
             
         except Exception as inner_e:
             print(f"DefaultAzureCredential authentication also failed: {inner_e}")
