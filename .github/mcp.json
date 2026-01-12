@@ -2,7 +2,8 @@
   "mcpServers": {
     "azure": {
       "command": "npx",
-      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "tools": ["*"]
     },
     "azure-devops": {
       "command": "npx",
@@ -10,11 +11,13 @@
       "env": {
         "ADO_PERSONAL_ACCESS_TOKEN": "${ADO_PERSONAL_ACCESS_TOKEN}",
         "ADO_ORG": "${ADO_ORG}"
-      }
+      },
+      "tools": ["*"]
     },
     "azure-data-explorer": {
       "command": "npx",
-      "args": ["-y", "adx-mcp-server"]
+      "args": ["-y", "adx-mcp-server"],
+      "tools": ["*"]
     }
   }
 }
