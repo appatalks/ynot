@@ -69,6 +69,129 @@ This repository supports **two authentication models** for accessing Azure resou
 
 ---
 
+## 🤖 Custom Agent: Azure Data Explorer Query Assistant
+
+This repository includes a **custom GitHub Copilot agent** specifically designed for Azure Data Explorer queries. This agent provides an **alternative to standard Copilot** with specialized expertise in KQL (Kusto Query Language) and ADX operations.
+
+### What is the ADX Query Agent?
+
+The Azure Data Explorer Query Agent is a specialized AI assistant that:
+- **Understands KQL syntax** and ADX-specific operations
+- **Generates optimized queries** based on natural language requests
+- **Provides educational explanations** of query patterns
+- **Follows security best practices** (read-only by default)
+- **Integrates with Azure MCP servers** for automatic resource discovery
+
+### How to Use the Custom Agent
+
+#### In GitHub Copilot Chat
+
+1. **Activate the agent** by mentioning it in your chat:
+   ```
+   @adx-query-agent Show me all my Azure Data Explorer clusters
+   ```
+
+2. **Ask questions about your data**:
+   ```
+   @adx-query-agent Query errors from the Logs table in the past hour
+   @adx-query-agent What's the schema of the Events table?
+   @adx-query-agent Count records by severity in the last 24 hours
+   ```
+
+3. **Get KQL query help**:
+   ```
+   @adx-query-agent How do I write a KQL query to aggregate by time bins?
+   @adx-query-agent What's the best way to join two tables in KQL?
+   ```
+
+#### In GitHub Codespaces
+
+The custom agent is automatically available when you:
+1. Create a Codespace from this repository
+2. Authenticate with Azure: `az login --use-device-code`
+3. Open GitHub Copilot Chat (Ctrl+Shift+I or Cmd+Shift+I)
+4. Reference the agent with `@adx-query-agent`
+
+### Agent Capabilities
+
+**Discovery & Exploration:**
+- List all ADX clusters in your subscription
+- Enumerate databases in a cluster
+- Show table schemas and column metadata
+- Get cluster and database statistics
+
+**Query Generation:**
+- Write efficient KQL queries from natural language
+- Optimize queries for performance
+- Apply time-based filtering automatically
+- Generate aggregations and visualizations
+
+**Best Practices:**
+- Follows KQL conventions and idioms
+- Suggests read-only operations by default
+- Validates syntax before execution
+- Provides educational explanations
+
+### Example Interactions
+
+**Example 1: Discover Resources**
+```
+You: @adx-query-agent What Azure Data Explorer resources do I have access to?
+Agent: Let me discover your ADX resources...
+[Lists all clusters with their databases]
+```
+
+**Example 2: Query Logs**
+```
+You: @adx-query-agent Find all error logs from the past 2 hours
+Agent: Here's a KQL query for that:
+```
+```kql
+Logs
+| where Timestamp > ago(2h)
+| where Level == "Error"
+| project Timestamp, Message, Source
+| order by Timestamp desc
+```
+This retrieves error-level logs from the past 2 hours...
+```
+
+**Example 3: Performance Analysis**
+```
+You: @adx-query-agent Show me average response time by endpoint
+Agent: I'll create a query to analyze response times:
+```
+```kql
+Metrics
+| where Timestamp > ago(24h)
+| where MetricName == "ResponseTime"
+| summarize avg(Value) by Endpoint
+| order by avg_Value desc
+```
+This calculates average response times for each endpoint...
+```
+
+### Configuration
+
+The agent is defined in `.github/agents/adx-query-agent.md` and automatically connects to:
+- The `azure-data-explorer` MCP server (for ADX-specific operations)
+- The `azure` MCP server (for general Azure resource management)
+
+No additional configuration is needed beyond the standard Azure authentication!
+
+### Benefits vs. Standard Copilot
+
+| Feature | Standard Copilot | ADX Query Agent |
+|---------|------------------|-----------------|
+| KQL Expertise | General | Specialized ✓ |
+| ADX Best Practices | Limited | Built-in ✓ |
+| Query Optimization | Basic | Advanced ✓ |
+| Educational Explanations | Sometimes | Always ✓ |
+| Security Defaults | Varies | Read-only ✓ |
+| Azure Integration | Manual setup | Auto-discovery ✓ |
+
+---
+
 ## Option 1: GitHub Codespaces with Per-User Azure Identity 🌐
 
 **Best for:** Collaborators who want to use their own Azure account in a Codespace without setting up shared credentials.

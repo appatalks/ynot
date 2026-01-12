@@ -44,6 +44,26 @@ This automatically configures GitHub Copilot to access your Azure resources with
 
 **[→ View Complete Setup Guide](./azure-mcp-data-explorer-deployer/MCP_SETUP.md)**
 
+### 🤖 Custom Agent for Azure Data Explorer
+
+This repository includes a **specialized GitHub Copilot agent** for Azure Data Explorer queries:
+
+- **Expert in KQL**: Specialized knowledge of Kusto Query Language syntax and patterns
+- **Query generation**: Convert natural language to optimized KQL queries
+- **Security-first**: Read-only operations by default with safety guardrails
+- **Educational**: Provides explanations and best practices with every query
+- **Auto-discovery**: Automatically connects to your ADX clusters via Azure MCP
+
+**Use the agent:**
+```
+@adx-query-agent Show me errors from the Logs table in the past hour
+@adx-query-agent What's the schema of the Events table?
+@adx-query-agent Count records by severity level
+```
+
+**Quick Start**: [5-Minute Setup Guide](./.github/agents/QUICKSTART.md)  
+**[→ Learn more about the ADX Query Agent](./azure-mcp-data-explorer-deployer/MCP_SETUP.md#-custom-agent-azure-data-explorer-query-assistant)**
+
 ### ✨ Automatic Azure Data Explorer Discovery
 
 Just sign in to Azure, and AI assistants can automatically:
