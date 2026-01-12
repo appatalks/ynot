@@ -1,21 +1,5 @@
 {
-  "mcpServers": {
-    "azure": {
-      "type": "local",
-      "command": "npx",
-      "args": ["-y", "@azure/mcp@latest", "server", "start"],
-      "tools": ["*"]
-    },
-    "azure-devops": {
-      "type": "local",
-      "command": "npx",
-      "args": ["-y", "@azure-devops/mcp"],
-      "env": {
-        "ADO_PERSONAL_ACCESS_TOKEN": "COPILOT_MCP_ADO_PERSONAL_ACCESS_TOKEN",
-        "ADO_ORG": "COPILOT_MCP_ADO_ORG"
-      },
-      "tools": ["*"]
-    },
+  "mcp-servers": {
     "azure-data-explorer": {
       "type": "local",
       "command": "npx",
