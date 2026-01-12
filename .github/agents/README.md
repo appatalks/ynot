@@ -2,6 +2,14 @@
 
 This directory contains custom GitHub Copilot agents that provide specialized expertise for working with Azure services.
 
+## 📚 Documentation
+
+- **[CHECKLIST.md](CHECKLIST.md)** - Quick setup checklist (start here!)
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[SETUP.md](SETUP.md)** - Detailed setup and configuration guide
+- **[TESTING.md](TESTING.md)** - Validation and troubleshooting
+- **[CONFIGURATION.md](CONFIGURATION.md)** - Architecture and technical details
+
 ## Available Agents
 
 ### 🔍 Azure Data Explorer Query Agent (`adx-query-agent.md`)
