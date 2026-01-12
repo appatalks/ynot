@@ -61,6 +61,7 @@ This repository includes a **specialized GitHub Copilot agent** for Azure Data E
 @adx-query-agent Count records by severity level
 ```
 
+**Quick Start**: [5-Minute Setup Guide](./.github/agents/QUICKSTART.md)  
 **[→ Learn more about the ADX Query Agent](./azure-mcp-data-explorer-deployer/MCP_SETUP.md#-custom-agent-azure-data-explorer-query-assistant)**
 
 ### ✨ Automatic Azure Data Explorer Discovery

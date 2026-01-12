@@ -174,6 +174,7 @@ Table1
     Table2
     | where Timestamp > ago(1h)
 ) on UserId
+| project UserId, Table1.Timestamp, Table1.Action, Table2.Details
 ```
 
 ## Error Handling
