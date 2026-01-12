@@ -368,11 +368,13 @@ If you've run `az login`, you can use Azure CLI authentication without any envir
   "mcpServers": {
     "azure-data-explorer": {
       "command": "npx",
-      "args": ["-y", "adx-mcp-server"]
+      "args": ["-y", "adx-mcp-server"],
+      "tools": ["*"]
     },
     "azure": {
       "command": "npx",
-      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "tools": ["*"]
     },
     "azure-devops": {
       "command": "npx",
@@ -380,7 +382,8 @@ If you've run `az login`, you can use Azure CLI authentication without any envir
       "env": {
         "ADO_PERSONAL_ACCESS_TOKEN": "your-azure-devops-pat-token",
         "ADO_ORG": "your-azure-devops-org-name"
-      }
+      },
+      "tools": ["*"]
     }
   }
 }
@@ -400,7 +403,8 @@ If you need to use specific credentials:
         "AZURE_TENANT_ID": "your-tenant-id",
         "AZURE_CLIENT_ID": "your-client-id",
         "AZURE_SUBSCRIPTION_ID": "your-subscription-id"
-      }
+      },
+      "tools": ["*"]
     },
     "azure": {
       "command": "npx",
@@ -409,7 +413,8 @@ If you need to use specific credentials:
         "AZURE_TENANT_ID": "your-tenant-id",
         "AZURE_CLIENT_ID": "your-client-id",
         "AZURE_SUBSCRIPTION_ID": "your-subscription-id"
-      }
+      },
+      "tools": ["*"]
     },
     "azure-devops": {
       "command": "npx",
@@ -417,7 +422,8 @@ If you need to use specific credentials:
       "env": {
         "ADO_PERSONAL_ACCESS_TOKEN": "your-azure-devops-pat-token",
         "ADO_ORG": "your-azure-devops-org-name"
-      }
+      },
+      "tools": ["*"]
     }
   }
 }

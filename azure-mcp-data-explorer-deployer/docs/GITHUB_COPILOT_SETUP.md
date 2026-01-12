@@ -190,11 +190,13 @@ The repository's `.github/mcp.json` is already configured for per-user authentic
   "mcpServers": {
     "azure": {
       "command": "npx",
-      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "tools": ["*"]
     },
     "azure-data-explorer": {
       "command": "npx",
-      "args": ["-y", "adx-mcp-server"]
+      "args": ["-y", "adx-mcp-server"],
+      "tools": ["*"]
     }
   }
 }
@@ -219,7 +221,8 @@ If you need shared identity with explicit credentials, modify `.github/mcp.json`
         "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
         "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
         "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
-      }
+      },
+      "tools": ["*"]
     },
     "azure-data-explorer": {
       "command": "npx",
@@ -228,7 +231,8 @@ If you need shared identity with explicit credentials, modify `.github/mcp.json`
         "AZURE_TENANT_ID": "${AZURE_TENANT_ID}",
         "AZURE_CLIENT_ID": "${AZURE_CLIENT_ID}",
         "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}"
-      }
+      },
+      "tools": ["*"]
     }
   }
 }
@@ -437,7 +441,8 @@ Restrict which tools Copilot can access:
   "mcpServers": {
     "azure-data-explorer": {
       "command": "npx",
-      "args": ["-y", "adx-mcp-server"]
+      "args": ["-y", "adx-mcp-server"],
+      "tools": ["*"]
     },
     "azure-devops": {
       "command": "npx",
@@ -445,7 +450,8 @@ Restrict which tools Copilot can access:
       "env": {
         "ADO_PERSONAL_ACCESS_TOKEN": "${COPILOT_MCP_ADO_PAT}",
         "ADO_ORG": "${COPILOT_MCP_ADO_ORG}"
-      }
+      },
+      "tools": ["*"]
     }
   }
 }
