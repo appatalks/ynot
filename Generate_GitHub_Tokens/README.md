@@ -12,3 +12,6 @@ This repository contains scripts useful for generating various types of GitHub A
 Usage Instructions and associated Documentation located within.
 
 Bonus Read [Blog Post Here](https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/)
+
+**Check this out too**
+https://github.com/actions/create-github-app-token
